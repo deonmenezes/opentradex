@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+references/
+data/*.json
+data/*.jsonl
+data/*.db
+data/*.db-*
+data/session_id.txt
+*.db
+web/node_modules/
+web/.next/
+.DS_Store
