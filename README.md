@@ -2,12 +2,6 @@
 
 **An autonomous AI agent that trades prediction markets by reading the news before the crowd.**
 
-Built for the [Entrepreneur First](https://www.joinef.com/) AI Agent Hackathon. Open Trademaxxxing is a fully autonomous system where Claude reasons about real-world events, estimates probabilities, and executes trades on [Kalshi](https://kalshi.com) - with real money.
-
-The signal is the edge. News breaks, rumors spread, data drops, and markets lag. This agent closes the gap.
-
-_Architecture diagram included below._
-
 ---
 
 ## How It Works
