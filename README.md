@@ -1,4 +1,4 @@
-# Open Trademaxxxing
+# OpenTradex
 
 **An autonomous AI agent that trades prediction markets by reading the news before the crowd.**
 
