@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, tryGetDb } from "@/lib/db";
+import { getDemoPortfolio } from "@/lib/demo-data";
 
 function tableExists(db: ReturnType<typeof getDb>, name: string): boolean {
   const row = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name) as Record<string, unknown> | undefined;
@@ -7,7 +8,10 @@ function tableExists(db: ReturnType<typeof getDb>, name: string): boolean {
 }
 
 export async function GET() {
-  const db = getDb();
+  const db = tryGetDb();
+  if (!db) {
+    return NextResponse.json(getDemoPortfolio());
+  }
 
   const hasPortfolio = tableExists(db, "portfolio");
   const hasTrades = tableExists(db, "trades");

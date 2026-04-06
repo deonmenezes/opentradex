@@ -1,0 +1,51 @@
+{
+  "name": "opentradex",
+  "version": "0.1.4",
+  "description": "OpenTradex CLI, onboarding flow, and market-rail toolkit for AI-assisted trading workflows.",
+  "type": "module",
+  "bin": {
+    "opentradex": "./bin/opentradex.mjs"
+  },
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    ".env.example",
+    "README.md",
+    "CLAUDE.md",
+    "SOUL.md",
+    "SPEC.md",
+    "SUBMISSION.md",
+    "main.py",
+    "requirements.txt",
+    "gossip/",
+    "data/.gitkeep",
+    "data/strategy_notes.md",
+    "web/",
+    "architecture.excalidraw",
+    "architecture.png"
+  ],
+  "scripts": {
+    "opentradex": "node ./bin/opentradex.mjs",
+    "test:cli": "node ./bin/opentradex.mjs --help && node ./bin/opentradex.mjs providers && node ./bin/opentradex.mjs doctor --workspace ."
+  },
+  "keywords": [
+    "kalshi",
+    "prediction-markets",
+    "trading",
+    "agent",
+    "claude-code",
+    "opentradex"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,12 +1,38 @@
 import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
 
 const DB_PATH = path.join(process.cwd(), "..", "data", "gossip.db");
 
+export function hasDbFile() {
+  try {
+    return fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function tryGetDb(): Database.Database | null {
+  if (!hasDbFile()) {
+    return null;
+  }
+
+  try {
+    return new Database(DB_PATH, {
+      readonly: true,
+      fileMustExist: true,
+    });
+  } catch {
+    return null;
+  }
+}
+
 export function getDb(): Database.Database {
-  // Fresh connection each request so we always see the latest writes from the Python agent
-  const db = new Database(DB_PATH, { readonly: true });
-  db.pragma("journal_mode = WAL");
+  const db = tryGetDb();
+  if (!db) {
+    throw new Error(`Could not open SQLite database at ${DB_PATH}`);
+  }
+
   return db;
 }
 

@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { tryGetDb } from "@/lib/db";
 import { spawn } from "child_process";
+import { getDemoAgentCycles } from "@/lib/demo-data";
 import path from "path";
+import fs from "fs";
 
 export async function GET() {
-  const db = getDb();
-  const cycles = db
-    .prepare("SELECT * FROM agent_logs ORDER BY timestamp DESC LIMIT 20")
-    .all();
+  const db = tryGetDb();
+  if (!db) {
+    return NextResponse.json(getDemoAgentCycles());
+  }
+
+  let cycles: unknown[] = [];
+  try {
+    cycles = db.prepare("SELECT * FROM agent_logs ORDER BY timestamp DESC LIMIT 20").all();
+  } catch {
+    cycles = getDemoAgentCycles();
+  }
+
   return NextResponse.json(cycles);
 }
 
@@ -16,6 +26,16 @@ export async function POST(request: Request) {
   const { action, prompt, rationale, interval } = body;
 
   const projectDir = path.join(process.cwd(), "..");
+  const isHostedPreview = Boolean(process.env.VERCEL);
+  const hasMainScript = fs.existsSync(path.join(projectDir, "main.py"));
+
+  if (isHostedPreview || !hasMainScript) {
+    return NextResponse.json({
+      status: "demo_mode",
+      message:
+        "Hosted preview mode is read-only. Run `opentradex onboard` or `python main.py` locally to start real agent cycles.",
+    });
+  }
 
   if (action === "run_cycle") {
     const args = ["main.py"];

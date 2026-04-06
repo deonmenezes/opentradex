@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 .venv/
+/node_modules/
+/dist/
+/coverage/
+*.tgz
 references/
 data/*.json
 data/*.jsonl
@@ -11,4 +15,7 @@ data/session_id.txt
 *.db
 web/node_modules/
 web/.next/
+.opentradex/
+opentradex.config.json
+npm-debug.log*
 .DS_Store

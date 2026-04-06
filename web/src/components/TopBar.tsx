@@ -1,19 +1,21 @@
 "use client";
 
-import { Activity, Play, Repeat, RotateCw } from "lucide-react";
+import { Activity, Play, Repeat, RotateCw, Sparkles, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { WorkspaceSummary } from "@/lib/types";
 
 interface TopBarProps {
+  workspace: WorkspaceSummary | null;
   liveStatus: string;
   agentStatus: string;
   rationale: string;
   loopInterval: number;
-  onRationaleChange: (v: string) => void;
+  onRationaleChange: (value: string) => void;
   onSubmitRationale: () => void;
   onRunCycle: () => void;
   onStartLoop: () => void;
   onRefresh: () => void;
-  onLoopIntervalChange: (v: number) => void;
+  onLoopIntervalChange: (value: number) => void;
 }
 
 const INTERVALS = [
@@ -25,6 +27,7 @@ const INTERVALS = [
 ];
 
 export function TopBar({
+  workspace,
   liveStatus,
   agentStatus,
   rationale,
@@ -36,92 +39,142 @@ export function TopBar({
   onRefresh,
   onLoopIntervalChange,
 }: TopBarProps) {
+  const tradingviewLabel = workspace?.tradingview.enabled
+    ? workspace.tradingview.connectorMode === "mcp"
+      ? workspace.tradingview.configured
+        ? "TradingView MCP"
+        : "TradingView MCP (needs setup)"
+      : "TradingView watchlist"
+    : null;
+
   return (
-    <header className="h-14 flex items-center gap-4 px-5 border-b border-border bg-card shrink-0 overflow-hidden max-w-full">
-      <div className="flex items-center gap-3 mr-2">
-        <Activity className="h-5 w-5 text-primary" />
-        <span className="font-semibold text-sm tracking-tight">
-          Open Trademaxxxing
-        </span>
-      </div>
+    <header className="shrink-0 border-b border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,250,246,0.82))] px-4 py-3 backdrop-blur xl:px-5">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/8 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-emerald-700">
+              <Activity className="h-3.5 w-3.5" />
+              OpenTradex
+            </div>
+            <div className="flex items-center gap-1.5 rounded-full border border-slate-900/8 bg-white/80 px-3 py-1 text-[11px] text-slate-600">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  liveStatus === "running"
+                    ? "bg-emerald-500 pulse-glow"
+                    : liveStatus === "error"
+                      ? "bg-rose-500"
+                      : "bg-amber-500"
+                }`}
+              />
+              {liveStatus === "running"
+                ? "Agent running"
+                : liveStatus === "error"
+                  ? "Needs attention"
+                  : "Ready"}
+            </div>
+            {workspace && (
+              <>
+                <InfoPill label={workspace.runtime} />
+                <InfoPill label={`${workspace.mode} mode`} />
+                <InfoPill label={workspace.primaryMarket} />
+                {tradingviewLabel ? <InfoPill label={tradingviewLabel} /> : null}
+              </>
+            )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+            <span className="font-medium text-slate-900">Command cockpit</span>
+            <span className="text-slate-400">/</span>
+            <span>
+              {workspace?.dashboardSurface === "chat"
+                ? "channel-based operator chat"
+                : "stream-first control surface"}
+            </span>
+            {agentStatus ? (
+              <>
+                <span className="text-slate-400">/</span>
+                <span className="truncate text-slate-500">{agentStatus}</span>
+              </>
+            ) : null}
+          </div>
+        </div>
 
-      <div className="flex items-center gap-2">
-        <span
-          className={`w-2 h-2 rounded-full shrink-0 ${
-            liveStatus === "running"
-              ? "bg-primary pulse-glow"
-              : liveStatus === "error"
-                ? "bg-destructive"
-                : "bg-muted-foreground/40"
-          }`}
-        />
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {liveStatus === "running"
-            ? "Running"
-            : liveStatus === "error"
-              ? "Error"
-              : "Idle"}
-        </span>
-      </div>
+        <div className="grid gap-3 xl:min-w-[44rem] xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-center">
+          <label className="flex min-w-0 items-center gap-2 rounded-2xl border border-slate-900/8 bg-white/86 px-3 py-2 shadow-sm">
+            <Sparkles className="h-4 w-4 shrink-0 text-amber-500" />
+            <input
+              type="text"
+              value={rationale}
+              onChange={(event) => onRationaleChange(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && onSubmitRationale()}
+              placeholder="Drop a thesis or catalyst and let the harness research it."
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+            />
+          </label>
 
-      {agentStatus && (
-        <span className="text-xs text-muted-foreground/60 truncate max-w-48">
-          {agentStatus}
-        </span>
-      )}
+          <div className="flex items-center gap-1 rounded-full border border-slate-900/8 bg-white/82 p-1">
+            {INTERVALS.map((interval) => (
+              <button
+                key={interval.value}
+                onClick={() => onLoopIntervalChange(interval.value)}
+                className={`rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] transition-colors ${
+                  loopInterval === interval.value
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                }`}
+              >
+                {interval.label}
+              </button>
+            ))}
+          </div>
 
-      <div className="flex-1 max-w-lg ml-auto">
-        <div className="relative">
-          <input
-            type="text"
-            value={rationale}
-            onChange={(e) => onRationaleChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onSubmitRationale()}
-            placeholder="Enter a thesis to research & trade..."
-            className="w-full bg-secondary/50 border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/40 transition-all"
-          />
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" onClick={onRunCycle} className="h-9 gap-1.5 rounded-full px-4 text-xs">
+              <Play className="h-3.5 w-3.5" />
+              Run cycle
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onStartLoop}
+              className="h-9 gap-1.5 rounded-full px-4 text-xs"
+            >
+              <Repeat className="h-3.5 w-3.5" />
+              Auto loop
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={onRefresh}
+              className="h-9 w-9 rounded-full"
+            >
+              <RotateCw className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
-        {INTERVALS.map((i) => (
-          <button
-            key={i.value}
-            onClick={() => onLoopIntervalChange(i.value)}
-            className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-              loopInterval === i.value
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            {i.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-1.5 shrink-0">
-        <Button size="sm" onClick={onRunCycle} className="h-7 text-xs gap-1.5">
-          <Play className="h-3 w-3" />
-          Run
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={onStartLoop}
-          className="h-7 text-xs gap-1.5"
-        >
-          <Repeat className="h-3 w-3" />
-          Loop
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          onClick={onRefresh}
-          className="h-7 w-7"
-        >
-          <RotateCw className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+      {workspace ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/8 bg-white/75 px-2.5 py-1">
+            <Workflow className="h-3 w-3" />
+            Channels: {workspace.channels.join(", ")}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/8 bg-white/75 px-2.5 py-1">
+            Rails: {workspace.enabledMarkets.join(", ")}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/8 bg-white/75 px-2.5 py-1">
+            Feeds: {workspace.integrations.join(", ")}
+          </span>
+        </div>
+      ) : null}
     </header>
+  );
+}
+
+function InfoPill({ label }: { label: string }) {
+  return (
+    <span className="rounded-full border border-slate-900/8 bg-white/75 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+      {label}
+    </span>
   );
 }

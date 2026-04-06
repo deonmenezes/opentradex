@@ -1,6 +1,68 @@
 # OpenTradex
 
-**An autonomous AI agent that trades prediction markets by reading the news before the crowd.**
+**Our implementation. Your strategy.**
+
+OpenTradex is an open-source onboarding and execution layer for AI-assisted trading workflows. It helps you choose a runtime, wire market rails, connect optional data APIs, and launch a live dashboard without pretending to own your strategy.
+
+Preferred setup: run `opentradex onboard`.
+
+## Install
+
+Welcome to OpenTradex:
+
+```bash
+# npm
+npm install -g opentradex@latest
+opentradex onboard
+```
+
+Alternative entry points:
+
+```bash
+# npx
+npx opentradex@latest onboard
+
+# bunx
+bunx opentradex@latest onboard
+
+# curl bootstrap
+curl -fsSL https://opentradex.vercel.app/install.sh | bash
+```
+
+`opentradex onboard` creates a workspace, writes a grouped `.env`, saves an `opentradex.config.json` workspace profile, optionally installs Python and web dependencies, and stores your default workspace in `~/.opentradex/config.json`.
+
+During onboarding you can choose:
+
+- Your agent runtime profile
+- Your primary market rail
+- Extra rails like `polymarket`, `tradingview`, `robinhood`, or `groww`
+- Your dashboard surface and operator messaging channels
+- Optional data integrations like `apify`, `rss`, `reddit`, `twitter`, `truthsocial`, and `tiktok`
+- Your package manager for local web workflows
+- TradingView in watchlist mode or via an optional local MCP connector
+
+### CLI Commands
+
+```bash
+opentradex onboard                     # guided setup
+opentradex doctor                      # verify runtime, packages, env config, and rails
+opentradex providers                   # show supported runtime, market, and data rails
+opentradex start                       # run the continuous trading loop
+opentradex cycle --rationale "..."     # run one cycle or research a thesis
+opentradex web                         # launch the Next.js dashboard
+```
+
+## Current Rail Support
+
+| Rail | Current role |
+|---|---|
+| Kalshi | Best live execution path |
+| Polymarket | Public market discovery and comparison |
+| TradingView | Watchlist context or optional local MCP-backed chart context |
+| Robinhood | Broker profile placeholder |
+| Groww | Broker profile placeholder |
+
+Kalshi is still the strongest live execution rail today. The others are intentionally exposed as discovery/profile rails so you can build the workflow now and decide later what deserves real execution adapters.
 
 ---
 
@@ -179,7 +241,7 @@ Real-time Next.js dashboard with:
 ## Quick Start
 
 ```bash
-# Install
+# Install the Python + web app manually
 pip install -r requirements.txt
 cd web && npm install && cd ..
 
@@ -200,6 +262,8 @@ python3 main.py --rationale "Tariffs on China will escalate next week"
 cd web && npm run dev
 # → http://localhost:3000
 ```
+
+If you want the simpler package flow instead, use `npm install -g opentradex@latest` and then `opentradex onboard`.
 
 ## Stack
 

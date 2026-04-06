@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { getDemoAgentStatus, getDemoStreamLines } from "@/lib/demo-data";
 
 const DATA_DIR = path.join(process.cwd(), "..", "data");
 const LIVE_LOG = path.join(DATA_DIR, "agent_live.jsonl");
@@ -9,6 +10,8 @@ const STATUS_FILE = path.join(DATA_DIR, "agent_status.json");
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+  const demoLines = getDemoStreamLines();
+  const demoStatus = getDemoAgentStatus();
 
   // Read status
   let status = { status: "idle" };
@@ -23,8 +26,10 @@ export async function GET(request: Request) {
   // Read live log from offset
   const lines: object[] = [];
   let newOffset = offset;
+  let hasLiveLog = false;
   try {
     if (fs.existsSync(LIVE_LOG)) {
+      hasLiveLog = true;
       const content = fs.readFileSync(LIVE_LOG, "utf-8");
       const allLines = content.split("\n").filter(Boolean);
       newOffset = allLines.length;
@@ -77,6 +82,14 @@ export async function GET(request: Request) {
     }
   } catch {
     // ignore
+  }
+
+  if (!hasLiveLog && lines.length === 0) {
+    return NextResponse.json({
+      status: demoStatus,
+      lines: demoLines.slice(offset),
+      offset: demoLines.length,
+    });
   }
 
   return NextResponse.json({

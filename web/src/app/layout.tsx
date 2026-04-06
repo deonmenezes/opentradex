@@ -1,21 +1,23 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const geistSans = Geist({
+const headingSans = Space_Grotesk({
   variable: "--font-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
+const plexMono = IBM_Plex_Mono({
   variable: "--font-geist-mono",
+  weight: ["400", "500", "600"],
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Open Trademaxxxing",
-  description: "Autonomous prediction market agent",
+  title: "OpenTradex",
+  description:
+    "Our implementation. Your strategy. Open-source onboarding, market rails, and a six-step guide for building AI-assisted trading systems.",
 };
 
 export default function RootLayout({
@@ -26,9 +28,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      className={`${headingSans.variable} ${plexMono.variable} min-h-full antialiased`}
     >
-      <body className="h-full overflow-hidden">
+      <body className="min-h-screen bg-background text-foreground">
         <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>

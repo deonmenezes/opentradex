@@ -1,5 +1,5 @@
 """
-Open Trademaxxxing - agent orchestrator.
+OpenTradex - agent orchestrator.
 
 Spawns Claude Code as a subprocess. The agent reads SOUL.md for personality,
 uses tools directly (web search, Apify, Kalshi API), and persists state to SQLite.
@@ -31,8 +31,106 @@ PROJECT_DIR = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_DIR / "data"
 SESSION_FILE = DATA_DIR / "session_id.txt"
 
-# The agent prompt: agentic, not scripted. Agent uses its own tools.
-CYCLE_PROMPT = """Read SOUL.md for your identity and strategy principles.
+
+def parse_csv_env(name: str, fallback: str = "") -> list[str]:
+    raw = os.getenv(name, fallback)
+    return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+
+def build_runtime_context() -> str:
+    runtime = os.getenv("OPENTRADEX_RUNTIME", "claude-code")
+    primary_market = os.getenv("OPENTRADEX_PRIMARY_MARKET", "kalshi")
+    enabled_markets = parse_csv_env("OPENTRADEX_ENABLED_MARKETS", primary_market)
+    integrations = parse_csv_env("OPENTRADEX_ENABLED_INTEGRATIONS", "apify,rss")
+    dashboard_surface = os.getenv("OPENTRADEX_DASHBOARD_SURFACE", "chat")
+    channels = parse_csv_env("OPENTRADEX_CHANNELS", "command,markets,feeds,risk,execution")
+    tradingview_connector_mode = os.getenv("TRADINGVIEW_CONNECTOR_MODE", "watchlist").strip().lower()
+    tradingview_mcp_enabled = os.getenv("TRADINGVIEW_MCP_ENABLED", "false").strip().lower() == "true"
+    tradingview_mcp_transport = os.getenv("TRADINGVIEW_MCP_TRANSPORT", "stdio").strip().lower()
+
+    lines = [
+        "Workspace profile:",
+        f"- Runtime profile: {runtime}",
+        f"- Primary market: {primary_market}",
+        f"- Enabled market rails: {', '.join(enabled_markets)}",
+        f"- Enabled data integrations: {', '.join(integrations)}",
+        f"- Dashboard surface: {dashboard_surface}",
+        f"- Operator channels: {', '.join(channels)}",
+        "- Use only the rails enabled in this workspace.",
+        "- Live execution is currently routed through Kalshi only. Other rails are for discovery, research, and cross-market context unless explicitly extended.",
+        "",
+        "Available market/data rails for this workspace:",
+    ]
+
+    if "kalshi" in enabled_markets:
+        lines.extend(
+            [
+                "- Kalshi discovery and execution:",
+                "  `PYTHONPATH=. python3 gossip/kalshi.py quick --limit 60`",
+                "  `PYTHONPATH=. python3 gossip/kalshi.py search \"specific topic\"`",
+                "  `PYTHONPATH=. python3 gossip/trader.py trade TICKER --side yes/no --estimate 0.XX --confidence high/medium --reasoning \"...\"`",
+            ]
+        )
+
+    if "polymarket" in enabled_markets:
+        lines.extend(
+            [
+                "- Polymarket discovery rail:",
+                "  `PYTHONPATH=. python3 gossip/polymarket.py scan --limit 40`",
+                "  `PYTHONPATH=. python3 gossip/polymarket.py search \"specific topic\"`",
+                "  Use Polymarket for cross-market validation, sentiment, and mispricing comparisons.",
+            ]
+        )
+
+    if "tradingview" in enabled_markets:
+        if tradingview_connector_mode == "mcp" and tradingview_mcp_enabled:
+            lines.extend(
+                [
+                    "- TradingView MCP rail:",
+                    f"  Transport: {tradingview_mcp_transport}",
+                    "  If the local Claude session has the TradingView MCP server available, use it for richer chart and symbol context.",
+                    "  Fall back to `TRADINGVIEW_WATCHLIST` if the MCP server is unavailable or incomplete.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "- TradingView watchlist rail:",
+                    "  Read `TRADINGVIEW_WATCHLIST` from `.env` and use it to focus macro/equity/crypto research.",
+                    "  Treat this as a watchlist/context source unless a dedicated adapter is added.",
+                ]
+            )
+
+    if "robinhood" in enabled_markets:
+        lines.append("- Robinhood is enabled as a broker profile placeholder. Use it for planning and watchlist context unless you add a dedicated execution adapter.")
+
+    if "groww" in enabled_markets:
+        lines.append("- Groww is enabled as a broker profile placeholder. Use it for planning and watchlist context unless you add a dedicated execution adapter.")
+
+    if "apify" in integrations:
+        lines.append("- Apify-backed news scraping is available through `PYTHONPATH=. python3 gossip/news.py --keywords \"...\"`.")
+    if "rss" in integrations:
+        lines.append("- RSS/live news fallbacks are enabled through the web dashboard and news routes.")
+
+    return "\n".join(lines)
+
+
+def build_harness_protocol() -> str:
+    return """Operator harness for this cycle:
+- Scout lane: scan enabled rails fast and surface the best 3-5 candidates.
+- Quant lane: extract the hard numbers, implied price, probability gap, and what actually changed.
+- Risk lane: kill weak, speculative, thin, or unsupported setups early. If the evidence is soft, size down or pass.
+- Executor lane: act only on the best 1-2 ideas, then record the reasoning clearly for the next cycle.
+
+Always think in that order: scout -> quantify -> challenge -> execute."""
+
+
+def build_cycle_prompt() -> str:
+    return f"""{build_runtime_context()}
+
+{build_harness_protocol()}
+
+Read SOUL.md for your identity and strategy principles.
 Read data/strategy_notes.md for lessons from past sessions.
 Check data/user_rationales.json for any pending user theses to research.
 
@@ -48,43 +146,47 @@ Then run a full trading cycle:
    Review each open position's unrealized P&L and current market price vs your entry.
 
 3. POSITION REVIEW — for each open position:
-   - If current price moved significantly toward your thesis (e.g. YES at 95c+ when you entered at 82c), consider selling now to lock profit vs waiting for settlement.
-   - If thesis has weakened or news contradicts it, EXIT: `PYTHONPATH=. python3 gossip/trader.py exit TICKER --reasoning "..."`
+   - If current price moved significantly toward your thesis, consider selling now to lock profit vs waiting for settlement.
+   - If thesis has weakened or news contradicts it, EXIT: `PYTHONPATH=. python3 gossip/trader.py exit TICKER --reasoning "..."`.
    - If thesis still holds and edge remains, HOLD.
    - Use web search to verify — don't just check prices, check if the underlying event happened.
 
 4. MARKET DISCOVERY — use targeted searches, not just broad scans:
-   - `PYTHONPATH=. python3 gossip/kalshi.py quick --limit 60` for broad overview
-   - `PYTHONPATH=. python3 gossip/kalshi.py search "specific topic"` for targeted lookups
-   - Focus on categories where news creates edge: Politics, Economics, Macro events
-   - Search for current events you already know about from news/web search
-   - Skip sports, entertainment, and illiquid markets (volume < 500, spread > 15c)
+   - Use the enabled market rails above.
+   - Focus on categories where news creates edge: Politics, Economics, Macro events, liquid crypto and cross-market event contracts.
+   - Search for current events you already know about from news/web search.
+   - Skip thin or noisy setups unless the edge is exceptional.
 
 5. RESEARCH — pick 3-5 promising markets:
-   - Use web search to find relevant news and primary sources
-   - Use `PYTHONPATH=. python3 gossip/news.py --keywords "..."` for broader news scraping
-   - Estimate the true probability based on evidence
-   - Look for near-arbitrage: events that already happened but market hasn't caught up
+   - Use web search to find relevant news and primary sources.
+   - Use `PYTHONPATH=. python3 gossip/news.py --keywords "..."` for broader news scraping.
+   - Use Polymarket or watchlist rails for comparison when they are enabled.
+   - Estimate the true probability based on evidence.
+   - Look for near-arbitrage: events that already happened but markets have not caught up.
 
 6. TRADE if you find edge > 10pp with clear reasoning:
    Before executing, answer in one line: "Evidence type: [hard/soft/speculation]. Weakest assumption: [X]."
    If the evidence is speculation, PASS unless edge is overwhelming (>25pp).
-   If you can't name what would make you wrong, your thesis isn't specific enough — PASS.
-   `PYTHONPATH=. python3 gossip/trader.py trade TICKER --side yes/no --estimate 0.XX --confidence high/medium --reasoning "..."`
+   If you cannot name what would make you wrong, your thesis is not specific enough — PASS.
+   Only route live orders through supported execution rails.
 
 7. Update data/strategy_notes.md with what you learned this cycle.
 
 EXECUTION DISCIPLINE:
-- Be decisive. Research → conclude → act. Don't loop endlessly.
+- Be decisive. Research -> conclude -> act. Do not loop endlessly.
 - For each market: reach a YES/NO/PASS decision within 2-3 tool calls.
-- Evaluate 3-5 markets per cycle, trade the best 1-2. Don't try to cover everything.
-- If you can't find edge after 5 minutes on a market, pass and move on.
+- Evaluate 3-5 markets per cycle, trade the best 1-2. Do not try to cover everything.
+- If you cannot find edge after 5 minutes on a market, pass and move on.
 - Write your conclusion even when you pass — future cycles benefit from it.
 """
 
 
 def build_rationale_prompt(rationale: str) -> str:
-    return f"""Read SOUL.md for your identity and strategy principles.
+    return f"""{build_runtime_context()}
+
+{build_harness_protocol()}
+
+Read SOUL.md for your identity and strategy principles.
 
 A user has submitted this thesis for you to research and potentially trade on:
 
@@ -100,7 +202,7 @@ Your job:
 7. Update data/strategy_notes.md if you learned something new.
 
 Check portfolio first: `PYTHONPATH=. python3 gossip/trader.py portfolio`
-Scan markets: `PYTHONPATH=. python3 gossip/kalshi.py scan` or `PYTHONPATH=. python3 gossip/kalshi.py search "relevant keywords"`
+Scan markets using the enabled rails above. Use Kalshi for execution and Polymarket/watchlist rails for comparison where available.
 """
 
 
@@ -115,6 +217,7 @@ def write_status(status: str, **extra) -> None:
 
 def run_agent(prompt: str, timeout: int = 600) -> dict:
     """Spawn Claude Code as a subprocess. Stream output to live log file."""
+    configured_runtime = os.getenv("OPENTRADEX_RUNTIME", "claude-code")
     cmd = [
         "claude",
         "--print", "-",
@@ -132,7 +235,7 @@ def run_agent(prompt: str, timeout: int = 600) -> dict:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     # Clear live log for this cycle
     LIVE_LOG.write_text("")
-    write_status("running")
+    write_status("running", configured_runtime=configured_runtime, runner="claude-code")
 
     start = time.time()
     session_id = None
@@ -241,7 +344,7 @@ def _now() -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Open Trademaxxxing agent")
+    parser = argparse.ArgumentParser(description="OpenTradex agent")
     parser.add_argument("--loop", action="store_true", help="Run continuously")
     parser.add_argument("--interval", type=int, default=None, help="Cycle interval in seconds")
     parser.add_argument("--prompt", type=str, default=None, help="Custom prompt")
@@ -251,18 +354,24 @@ def main():
 
     args = parser.parse_args()
     interval = args.interval or int(os.getenv("CYCLE_INTERVAL", "900"))
+    configured_runtime = os.getenv("OPENTRADEX_RUNTIME", "claude-code")
 
     if args.rationale:
         submit_rationale(args.rationale)
         prompt = build_rationale_prompt(args.rationale)
     else:
-        prompt = args.prompt or CYCLE_PROMPT
+        prompt = args.prompt or build_cycle_prompt()
 
     if args.dry_run:
         print(prompt)
         return
 
-    print(f"[Open Trademaxxxing] Starting agent", file=sys.stderr)
+    print(f"[OpenTradex] Starting agent", file=sys.stderr)
+    if configured_runtime != "claude-code":
+        print(
+            f"  Runtime profile: {configured_runtime} (executing with Claude Code runner)",
+            file=sys.stderr,
+        )
     print(f"  Mode: {'loop (' + str(interval) + 's)' if args.loop else 'single cycle'}", file=sys.stderr)
 
     while True:

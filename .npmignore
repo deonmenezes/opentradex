@@ -1,0 +1,16 @@
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.venv/
+.opentradex/
+*.tgz
+web/.next/
+web/node_modules/
+web/.vercel/
+web/.playwright-cli/
+web/.playwright-cli/**
+web/output/
+web/output/**
+data/*.db
+data/*.db-*

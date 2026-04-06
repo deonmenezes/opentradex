@@ -113,6 +113,36 @@ export interface StreamLine {
   result?: string;
 }
 
+export interface WorkspaceSummary {
+  isDemo: boolean;
+  runtime: string;
+  packageManager: string;
+  mode: string;
+  primaryMarket: string;
+  enabledMarkets: string[];
+  integrations: string[];
+  dashboardSurface: string;
+  channels: string[];
+  tradingview: {
+    enabled: boolean;
+    watchlist: string[];
+    connectorMode: "watchlist" | "mcp";
+    mcpEnabled: boolean;
+    transport: "stdio" | "http";
+    command?: string;
+    args?: string;
+    url?: string;
+    configured: boolean;
+  };
+}
+
+export interface PromptEntry {
+  id: string;
+  text: string;
+  channel: string;
+  createdAt: string;
+}
+
 export function kalshiUrl(ticker: string, title?: string): string {
   const parts = ticker.split("-");
   const event = parts[0].toLowerCase();
