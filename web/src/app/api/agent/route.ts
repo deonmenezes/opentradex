@@ -26,6 +26,7 @@ export async function POST(request: Request) {
   const { action, prompt, rationale, interval } = body;
 
   const projectDir = path.join(process.cwd(), "..");
+  const pythonCommand = process.platform === "win32" ? "python" : "python3";
   const isHostedPreview = Boolean(process.env.VERCEL);
   const hasMainScript = fs.existsSync(path.join(projectDir, "main.py"));
 
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     if (prompt) args.push("--prompt", prompt);
     if (rationale) args.push("--rationale", rationale);
 
-    const child = spawn("python3", args, {
+    const child = spawn(pythonCommand, args, {
       cwd: projectDir,
       detached: true,
       stdio: "ignore",
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
     const args = ["main.py", "--loop"];
     if (interval) args.push("--interval", String(interval));
 
-    const child = spawn("python3", args, {
+    const child = spawn(pythonCommand, args, {
       cwd: projectDir,
       detached: true,
       stdio: "ignore",
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "rationale required" }, { status: 400 });
     }
 
-    const child = spawn("python3", ["main.py", "--rationale", rationale], {
+    const child = spawn(pythonCommand, ["main.py", "--rationale", rationale], {
       cwd: projectDir,
       detached: true,
       stdio: "ignore",

@@ -7,6 +7,8 @@ import type { NewsArticle, SocialPost } from "@/lib/types";
 
 type Tab = "news" | "twitter" | "truth" | "reddit" | "tiktok";
 
+const COMMUNITY_DISCORD_URL = "https://discord.gg/rFdwJC8z";
+
 interface NewsFeedProps {
   news: NewsArticle[];
   tweets: SocialPost[];
@@ -60,6 +62,29 @@ export function NewsFeed({ news, tweets, truthPosts, redditPosts, tiktokPosts, l
               Live
             </span>
           </div>
+        </div>
+        <div className="px-2 pb-2">
+          <a
+            href={COMMUNITY_DISCORD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center justify-between rounded-2xl border border-emerald-500/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(14,116,144,0.08))] px-3 py-2.5 transition-colors hover:border-emerald-500/35 hover:bg-[linear-gradient(135deg,rgba(16,185,129,0.18),rgba(14,116,144,0.14))]"
+          >
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-emerald-700/80">
+                Community
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-900">
+                Join the OpenTradex Discord
+              </p>
+              <p className="mt-1 text-[11px] leading-5 text-slate-600">
+                Ask questions, share setups, and follow product updates with the operator crew.
+              </p>
+            </div>
+            <div className="ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-500/20 bg-white/80 text-emerald-700 transition-transform group-hover:scale-105">
+              <ExternalLink className="h-4 w-4" />
+            </div>
+          </a>
         </div>
         <div className="flex px-1 pb-1 gap-0.5">
           {tabs.map((t) => (

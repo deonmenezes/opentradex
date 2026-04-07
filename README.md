@@ -4,6 +4,8 @@
 
 OpenTradex is an open-source onboarding and execution layer for AI-assisted trading workflows. It helps you choose a runtime, wire market rails, connect optional data APIs, and launch a live dashboard without pretending to own your strategy.
 
+Working local runtimes today: `claude-code` and `codex-cli`.
+
 Preferred setup: run `opentradex onboard`.
 
 ## Install
@@ -81,7 +83,7 @@ The agent found this on its first run. Bondi's firing was confirmed by CNN, Fox,
 
 ## Architecture: The Paperclip Pattern
 
-The core insight: **Claude Code IS the agent.** We don't call the Anthropic API. We spawn the `claude` CLI as a subprocess, which gives us a full reasoning agent with built-in tool use — web search, file I/O, bash execution — at zero marginal LLM cost on a Max subscription.
+The core insight: **the local coding agent is the runner.** OpenTradex can now spawn either `claude` or `codex exec` as a subprocess, giving the harness a real tool-using operator instead of a thin chat wrapper.
 
 ```
                            ┌──────────────────────────────────┐

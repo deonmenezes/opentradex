@@ -72,6 +72,24 @@ export async function GET(request: Request) {
               }
             }
           }
+          if (msg.type === "item.started" && msg.item?.type === "command_execution") {
+            lines.push({
+              type: "tool_use",
+              tool: "command_execution",
+              input: String(msg.item.command || "").slice(0, 500),
+            });
+          }
+          if (msg.type === "item.completed" && msg.item?.type === "command_execution") {
+            const output = String(msg.item.aggregated_output || "").slice(0, 2000);
+            lines.push({
+              type: "tool_result",
+              tool_use_id: msg.item.id,
+              text: output || `exit_code=${msg.item.exit_code ?? "unknown"}`,
+            });
+          }
+          if (msg.type === "item.completed" && msg.item?.type === "agent_message" && msg.item?.text) {
+            lines.push({ type: "text", text: String(msg.item.text) });
+          }
           if (msg.type === "result") {
             lines.push({ type: "result", result: msg.result?.slice(0, 5000) });
           }

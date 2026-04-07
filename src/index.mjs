@@ -76,6 +76,11 @@ const DEFAULT_ENV = {
   GROWW_ACCESS_TOKEN: "",
   OPENAI_API_KEY: "",
   GEMINI_API_KEY: "",
+  OPENTRADEX_CODEX_MODEL: "",
+  OPENTRADEX_CODEX_PROFILE: "",
+  OPENTRADEX_CODEX_SANDBOX: "workspace-write",
+  OPENTRADEX_CODEX_FULL_AUTO: "true",
+  OPENTRADEX_CODEX_ENABLE_SEARCH: "false",
   APIFY_API_TOKEN: "",
   NEWS_PROVIDER: "apify,rss",
   BANKROLL: "30.00",
@@ -258,6 +263,16 @@ export function writeEnvFile(workspace, overrides = {}) {
       ],
     },
     {
+      title: "Codex CLI",
+      keys: [
+        "OPENTRADEX_CODEX_MODEL",
+        "OPENTRADEX_CODEX_PROFILE",
+        "OPENTRADEX_CODEX_SANDBOX",
+        "OPENTRADEX_CODEX_FULL_AUTO",
+        "OPENTRADEX_CODEX_ENABLE_SEARCH",
+      ],
+    },
+    {
       title: "Data integrations",
       keys: [
         "APIFY_API_TOKEN",
@@ -358,6 +373,9 @@ export function collectDoctor(workspaceArg) {
 
   if (runtime === "claude-code") {
     checks.push(check("Claude CLI", commandWorks("claude", ["--version"]), "Install and sign in to Claude Code."));
+  }
+  if (runtime === "codex-cli") {
+    checks.push(check("Codex CLI", commandWorks("codex", ["--version"]), "Install and sign in to Codex CLI."));
   }
   if (runtime === "openai-api") {
     checks.push(check("OPENAI_API_KEY", Boolean(env.OPENAI_API_KEY), "Add OPENAI_API_KEY if you want to extend the OpenAI runtime profile."));
@@ -1167,8 +1185,8 @@ function printDashboardBoot({ workspace, packageManager, profile }) {
     `additional rails: ${profile.enabledMarkets.join(", ") || "none"}`,
     `channels: ${profile.channels?.join(", ") || "none"}`,
     "",
-    "When the dev server is ready, open the dashboard and warm boot the local harness.",
-    "Suggested local URL: http://localhost:3000/dashboard",
+    "When the dev server is ready, OpenTradex now lands on the dashboard first.",
+    "Suggested local URL: http://localhost:3000/",
   ]);
 }
 
@@ -1290,7 +1308,9 @@ function buildDoctorNotes({
 }) {
   const notes = [];
 
-  if (runtime !== "claude-code") {
+  if (runtime === "codex-cli") {
+    notes.push("Codex CLI is configured as the active runner. Dashboard chat requests can now route straight into `codex exec --json` for direct operator answers.");
+  } else if (runtime !== "claude-code") {
     notes.push("The current orchestrator still launches Claude Code for end-to-end execution. Other runtime profiles are stored cleanly in config so you can extend the runner later.");
   }
 

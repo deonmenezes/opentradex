@@ -156,6 +156,7 @@ function printHelp() {
     "  bunx opentradex@latest onboard",
     "  opentradex web",
     "  opentradex onboard --llm claude-code --primary-market kalshi --markets polymarket,tradingview --dashboard-surface chat",
+    "  opentradex onboard --llm codex-cli --primary-market kalshi --dashboard-surface chat",
     "  opentradex doctor",
     "  opentradex providers",
     "  opentradex cycle --rationale \"Tariffs will escalate next week\"",

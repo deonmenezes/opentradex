@@ -93,8 +93,8 @@ export function HarnessBootPanel({
             Start in chat, route by channel, keep the rails honest.
           </h3>
           <p className="mt-3 max-w-xl text-sm leading-7 text-[#e9c9d9]/80">
-            This cockpit is meant to feel like an operator interface, not a flat log.
-            Pick a lane, send a mission, and use the right connector for the job.
+            This cockpit is meant to answer fast, queue cleanly while the agent is busy, and keep
+            the operator on the dashboard first. Pick a lane, send a mission, and keep the rails honest.
           </p>
         </div>
 

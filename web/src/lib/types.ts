@@ -141,6 +141,7 @@ export interface PromptEntry {
   text: string;
   channel: string;
   createdAt: string;
+  state?: "queued" | "sent";
 }
 
 export function kalshiUrl(ticker: string, title?: string): string {

@@ -8,6 +8,7 @@ interface TopBarProps {
   workspace: WorkspaceSummary | null;
   liveStatus: string;
   agentStatus: string;
+  queuedCount: number;
   rationale: string;
   loopInterval: number;
   onRationaleChange: (value: string) => void;
@@ -30,6 +31,7 @@ export function TopBar({
   workspace,
   liveStatus,
   agentStatus,
+  queuedCount,
   rationale,
   loopInterval,
   onRationaleChange,
@@ -93,6 +95,12 @@ export function TopBar({
               <>
                 <span className="text-slate-400">/</span>
                 <span className="truncate text-slate-500">{agentStatus}</span>
+              </>
+            ) : null}
+            {queuedCount > 0 ? (
+              <>
+                <span className="text-slate-400">/</span>
+                <span className="text-amber-600">{queuedCount} queued</span>
               </>
             ) : null}
           </div>

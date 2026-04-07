@@ -51,6 +51,8 @@
 }
 
 :root {
+  --font-sans: "Segoe UI", "Aptos", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-geist-mono: "Cascadia Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --background: oklch(0.985 0.01 95);
   --foreground: oklch(0.23 0.03 238);
   --card: oklch(0.992 0.008 95);

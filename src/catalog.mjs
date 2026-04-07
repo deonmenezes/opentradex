@@ -21,6 +21,12 @@ export const RUNTIME_OPTIONS = [
     support: "working",
   },
   {
+    id: "codex-cli",
+    label: "Codex CLI",
+    description: "OpenAI Codex agent runner for dashboard-first chat, questions, and local tool use.",
+    support: "working",
+  },
+  {
     id: "openai-api",
     label: "OpenAI API",
     description: "Profile scaffold for a future Responses API runner.",
