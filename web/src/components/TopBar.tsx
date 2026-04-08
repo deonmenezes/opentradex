@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Play, Repeat, RotateCw, Sparkles, Workflow } from "lucide-react";
+import { Activity, ExternalLink, FolderGit2, MessageCircle, Play, Repeat, RotateCw, Sparkles, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { WorkspaceSummary } from "@/lib/types";
 
@@ -26,6 +26,9 @@ const INTERVALS = [
   { value: 900, label: "15m" },
   { value: 1800, label: "30m" },
 ];
+
+const REPO_URL = "https://github.com/deonmenezes/opentradex";
+const DISCORD_URL = "https://discord.gg/rFdwJC8z";
 
 export function TopBar({
   workspace,
@@ -173,6 +176,8 @@ export function TopBar({
           <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/8 bg-white/75 px-2.5 py-1">
             Feeds: {workspace.integrations.join(", ")}
           </span>
+          <TopLinkPill href={REPO_URL} label="GitHub repo" icon={FolderGit2} />
+          <TopLinkPill href={DISCORD_URL} label="Discord" icon={MessageCircle} />
         </div>
       ) : null}
     </header>
@@ -184,5 +189,28 @@ function InfoPill({ label }: { label: string }) {
     <span className="rounded-full border border-slate-900/8 bg-white/75 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
       {label}
     </span>
+  );
+}
+
+function TopLinkPill({
+  href,
+  label,
+  icon: Icon,
+}: {
+  href: string;
+  label: string;
+  icon: typeof FolderGit2;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition-colors hover:border-slate-900/18 hover:bg-white"
+    >
+      <Icon className="h-3 w-3" />
+      {label}
+      <ExternalLink className="h-3 w-3 text-slate-400" />
+    </a>
   );
 }
