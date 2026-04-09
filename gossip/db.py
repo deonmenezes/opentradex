@@ -123,7 +123,7 @@ class GossipDB:
         # Ensure portfolio row exists
         row = self.conn.execute("SELECT COUNT(*) FROM portfolio").fetchone()
         if row[0] == 0:
-            bankroll = float(os.getenv("BANKROLL", "15.0"))
+            bankroll = float(os.getenv("BANKROLL", "30.0"))
             self.conn.execute(
                 "INSERT INTO portfolio (id, bankroll, updated_at) VALUES (1, ?, ?)",
                 (bankroll, _now()),

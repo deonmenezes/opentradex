@@ -27,6 +27,40 @@ function parseEnv(text: string) {
   return values;
 }
 
+export function readEnvFile() {
+  if (!fs.existsSync(ENV_PATH)) {
+    return { values: {}, raw: "" };
+  }
+  const raw = fs.readFileSync(ENV_PATH, "utf8");
+  return { values: parseEnv(raw), raw };
+}
+
+export function writeEnvValue(key: string, value: string) {
+  const { raw } = readEnvFile();
+  const lines = raw.split(/\r?\n/);
+  let updated = false;
+  const next = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      return line;
+    }
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex === -1) {
+      return line;
+    }
+    const existingKey = line.slice(0, separatorIndex).trim();
+    if (existingKey !== key) {
+      return line;
+    }
+    updated = true;
+    return `${key}=${value}`;
+  });
+  if (!updated) {
+    next.push(`${key}=${value}`);
+  }
+  fs.writeFileSync(ENV_PATH, `${next.join("\n").replace(/\n+$/, "")}\n`, "utf8");
+}
+
 function readJson(filePath: string) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -94,7 +128,7 @@ export function readWorkspaceSummary(): WorkspaceSummary | null {
 
   return {
     isDemo: false,
-    runtime: String(env.OPENTRADEX_RUNTIME || profile.runtime || "claude-code"),
+    runtime: String(env.OPENTRADEX_RUNTIME || profile.runtime || "codex-cli"),
     packageManager: String(env.OPENTRADEX_PACKAGE_MANAGER || profile.packageManager || "npm"),
     mode: String(env.OPENTRADEX_EXECUTION_MODE || profile.mode || "paper"),
     primaryMarket: String(env.OPENTRADEX_PRIMARY_MARKET || profile.primaryMarket || "kalshi"),
@@ -102,6 +136,8 @@ export function readWorkspaceSummary(): WorkspaceSummary | null {
     integrations,
     dashboardSurface: String(env.OPENTRADEX_DASHBOARD_SURFACE || profile.dashboardSurface || "chat"),
     channels,
+    executionRail: String(env.OPENTRADEX_LIVE_EXECUTION_MARKET || profile.primaryMarket || env.OPENTRADEX_PRIMARY_MARKET || "kalshi"),
+    researchRails: enabledMarkets.filter((market) => market !== String(env.OPENTRADEX_LIVE_EXECUTION_MARKET || profile.primaryMarket || env.OPENTRADEX_PRIMARY_MARKET || "kalshi")),
     tradingview: {
       enabled: tradingviewEnabled,
       watchlist: parseCsv(env.TRADINGVIEW_WATCHLIST, DEFAULT_WATCHLIST),

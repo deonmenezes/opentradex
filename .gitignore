@@ -16,6 +16,7 @@ data/session_id.txt
 web/node_modules/
 web/.next/
 .opentradex/
+.codex-home/
 opentradex.config.json
 npm-debug.log*
 .DS_Store

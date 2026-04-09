@@ -38,8 +38,9 @@ PROD_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 DEMO_BASE = "https://demo-api.kalshi.co/trade-api/v2"
 
 def get_base_url() -> str:
-    """Always prod. Demo API has stale/fake data and is useless."""
-    return PROD_BASE
+    """Use prod by default, but honor explicit demo mode for testing workflows."""
+    use_demo = os.getenv("KALSHI_USE_DEMO", "false").strip().lower() == "true"
+    return DEMO_BASE if use_demo else PROD_BASE
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr)
@@ -344,7 +345,10 @@ async def place_order(ticker: str, action: str, side: str, count: int, price_cen
         "count": count,
     }
     if price_cents is not None:
-        body["yes_price"] = price_cents
+        if side == "yes":
+            body["yes_price"] = price_cents
+        else:
+            body["no_price"] = price_cents
     async with aiohttp.ClientSession() as session:
         return await api_post(session, "/portfolio/orders", body)
 

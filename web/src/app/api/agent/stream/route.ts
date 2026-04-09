@@ -39,6 +39,33 @@ export async function GET(request: Request) {
         try {
           const msg = JSON.parse(line);
           // Extract useful info for the frontend
+          if (msg.type === "item.completed" && msg.item) {
+            const item = msg.item;
+            if (item.type === "agent_message" && item.text) {
+              lines.push({ type: "text", text: item.text });
+            }
+            if (item.type === "command_execution") {
+              lines.push({
+                type: "tool_use",
+                tool: "exec_command",
+                input: String(item.command || "").slice(0, 500),
+              });
+              if (item.aggregated_output) {
+                lines.push({
+                  type: "tool_result",
+                  tool_use_id: item.id,
+                  text: String(item.aggregated_output).slice(0, 2000),
+                });
+              }
+            }
+            if (item.type === "web_search") {
+              lines.push({
+                type: "tool_use",
+                tool: "web_search",
+                input: String(item.query || "").slice(0, 500),
+              });
+            }
+          }
           if (msg.type === "assistant" && msg.message?.content) {
             for (const block of msg.message.content) {
               if (block.type === "text" && block.text) {
@@ -71,24 +98,6 @@ export async function GET(request: Request) {
                 }
               }
             }
-          }
-          if (msg.type === "item.started" && msg.item?.type === "command_execution") {
-            lines.push({
-              type: "tool_use",
-              tool: "command_execution",
-              input: String(msg.item.command || "").slice(0, 500),
-            });
-          }
-          if (msg.type === "item.completed" && msg.item?.type === "command_execution") {
-            const output = String(msg.item.aggregated_output || "").slice(0, 2000);
-            lines.push({
-              type: "tool_result",
-              tool_use_id: msg.item.id,
-              text: output || `exit_code=${msg.item.exit_code ?? "unknown"}`,
-            });
-          }
-          if (msg.type === "item.completed" && msg.item?.type === "agent_message" && msg.item?.text) {
-            lines.push({ type: "text", text: String(msg.item.text) });
           }
           if (msg.type === "result") {
             lines.push({ type: "result", result: msg.result?.slice(0, 5000) });

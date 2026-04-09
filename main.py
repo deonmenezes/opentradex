@@ -1,9 +1,8 @@
 """
 OpenTradex - agent orchestrator.
 
-Spawns a local coding agent as a subprocess. The agent reads SOUL.md for
-personality, uses tools directly (web search, local files, shell, Kalshi API),
-and persists state to SQLite.
+Spawns Codex CLI as a subprocess. The agent reads SOUL.md for personality,
+uses tools directly (web search, Apify, Kalshi API), and persists state to SQLite.
 
 Usage:
     python3 main.py                         # single research + trade cycle
@@ -39,7 +38,7 @@ def parse_csv_env(name: str, fallback: str = "") -> list[str]:
 
 
 def build_runtime_context() -> str:
-    runtime = os.getenv("OPENTRADEX_RUNTIME", "claude-code")
+    runtime = os.getenv("OPENTRADEX_RUNTIME", "codex-cli")
     primary_market = os.getenv("OPENTRADEX_PRIMARY_MARKET", "kalshi")
     enabled_markets = parse_csv_env("OPENTRADEX_ENABLED_MARKETS", primary_market)
     integrations = parse_csv_env("OPENTRADEX_ENABLED_INTEGRATIONS", "apify,rss")
@@ -89,7 +88,7 @@ def build_runtime_context() -> str:
                 [
                     "- TradingView MCP rail:",
                     f"  Transport: {tradingview_mcp_transport}",
-                    "  If the local Claude session has the TradingView MCP server available, use it for richer chart and symbol context.",
+                    "  If the local Codex session has the TradingView MCP server available, use it for richer chart and symbol context.",
                     "  Fall back to `TRADINGVIEW_WATCHLIST` if the MCP server is unavailable or incomplete.",
                 ]
             )
@@ -114,27 +113,6 @@ def build_runtime_context() -> str:
         lines.append("- RSS/live news fallbacks are enabled through the web dashboard and news routes.")
 
     return "\n".join(lines)
-
-
-def build_operator_context() -> str:
-    runtime = os.getenv("OPENTRADEX_RUNTIME", "claude-code")
-    primary_market = os.getenv("OPENTRADEX_PRIMARY_MARKET", "kalshi")
-    enabled_markets = parse_csv_env("OPENTRADEX_ENABLED_MARKETS", primary_market)
-    integrations = parse_csv_env("OPENTRADEX_ENABLED_INTEGRATIONS", "apify,rss")
-    dashboard_surface = os.getenv("OPENTRADEX_DASHBOARD_SURFACE", "chat")
-    channels = parse_csv_env("OPENTRADEX_CHANNELS", "command,markets,feeds,risk,execution")
-
-    return "\n".join(
-        [
-            "Workspace chat profile:",
-            f"- Runtime profile: {runtime}",
-            f"- Primary market rail: {primary_market}",
-            f"- Enabled rails: {', '.join(enabled_markets)}",
-            f"- Enabled integrations: {', '.join(integrations)}",
-            f"- Dashboard surface: {dashboard_surface}",
-            f"- Operator channels: {', '.join(channels)}",
-        ]
-    )
 
 
 def build_harness_protocol() -> str:
@@ -228,34 +206,6 @@ Scan markets using the enabled rails above. Use Kalshi for execution and Polymar
 """
 
 
-def build_operator_prompt(user_prompt: str) -> str:
-    return f"""{build_operator_context()}
-
-You are in the OpenTradex operator chat surface.
-
-The operator is asking a direct question or requesting a focused task:
-
-USER REQUEST: {user_prompt}
-
-Direct-response rules:
-1. Treat this like a chat request first, not a repo audit or market cycle.
-2. If the request can be answered from the prompt or general product knowledge, answer immediately with zero tool calls.
-3. Do not inspect the repo, manifests, config, or market rails unless the answer actually depends on local verification.
-4. Do not start by saying you are inspecting files or the repo unless that inspection is truly necessary.
-5. For greetings, yes/no questions, setup questions, and "can you..." requests, answer in 1-4 short sentences first.
-6. If local verification is needed, use the smallest possible check and report the result plainly.
-7. For market questions, scan only the enabled rails and keep the answer decision-oriented.
-8. Do not place live trades unless the operator explicitly asks for execution and the supported rail is configured.
-9. End with a crisp "Next step" line only when there is an obvious follow-up.
-
-Preferred workflow:
-- Start with zero tool calls whenever possible.
-- Stay within 0-2 tool calls for straightforward questions.
-- Escalate to broader workspace, market, or news research only if the request actually needs it.
-- Keep the final answer tight, practical, and operator-friendly.
-"""
-
-
 LIVE_LOG = DATA_DIR / "agent_live.jsonl"
 LIVE_STATUS = DATA_DIR / "agent_status.json"
 
@@ -265,112 +215,34 @@ def write_status(status: str, **extra) -> None:
     LIVE_STATUS.write_text(json.dumps({"status": status, "timestamp": _now(), **extra}))
 
 
-def env_flag(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+def _collect_stderr(stderr_output: str, limit: int = 2000) -> str:
+    lines = [line.strip() for line in stderr_output.splitlines() if line.strip()]
+    return "\n".join(lines[-20:])[:limit]
 
 
-def build_runner_command(
-    configured_runtime: str,
-    prompt: str,
-    max_turns: int,
-    allow_full_auto: bool = True,
-) -> tuple[list[str], str, bool]:
-    if configured_runtime == "codex-cli":
-        executable = "codex.cmd" if os.name == "nt" else "codex"
-        sandbox = os.getenv("OPENTRADEX_CODEX_SANDBOX", "workspace-write").strip().lower() or "workspace-write"
-        model = os.getenv("OPENTRADEX_CODEX_MODEL", "").strip()
-        profile = os.getenv("OPENTRADEX_CODEX_PROFILE", "").strip()
-        full_auto = env_flag("OPENTRADEX_CODEX_FULL_AUTO", True)
-        enable_search = env_flag("OPENTRADEX_CODEX_ENABLE_SEARCH", False)
-
-        cmd = [
-            executable,
-            "exec",
-            "--json",
-            "--skip-git-repo-check",
-        ]
-        if profile:
-            cmd.extend(["--profile", profile])
-        if model:
-            cmd.extend(["--model", model])
-        if enable_search:
-            cmd.append("--search")
-        if allow_full_auto and full_auto and sandbox == "workspace-write":
-            cmd.append("--full-auto")
-        else:
-            cmd.extend(["--sandbox", sandbox])
-        cmd.append(prompt)
-        return cmd, "codex-cli", False
-
-    cmd = [
-        "claude",
-        "--print", "-",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--max-turns", str(max_turns),
-        "--dangerously-skip-permissions",
+def _is_transient_codex_error(stderr_output: str) -> bool:
+    text = stderr_output.lower()
+    transient_patterns = [
+        "we're currently experiencing high demand",
+        "500 internal server error",
+        "stream disconnected",
+        "timed out",
+        "temporarily unavailable",
     ]
-    return cmd, "claude-code", True
+    return any(pattern in text for pattern in transient_patterns)
 
 
-def consume_stream_event(
-    configured_runtime: str,
-    msg: dict,
-    current_output: str,
-    current_session_id: str | None,
-) -> tuple[str, str | None]:
-    agent_output = current_output
-    session_id = current_session_id
-
-    if configured_runtime == "codex-cli":
-        if msg.get("type") == "thread.started" and msg.get("thread_id"):
-            session_id = msg["thread_id"]
-        elif msg.get("type") == "item.started" and msg.get("item", {}).get("type") == "command_execution":
-            write_status("running", tool="command_execution")
-        elif msg.get("type") == "item.completed":
-            item = msg.get("item", {})
-            if item.get("type") == "agent_message" and item.get("text"):
-                text = item.get("text", "")
-                agent_output += text + "\n"
-                write_status("running", last_text=text[:200])
-            elif item.get("type") == "command_execution":
-                write_status("running", tool="command_execution")
-        return agent_output, session_id
-
-    if msg.get("type") == "system" and "session_id" in msg:
-        session_id = msg["session_id"]
-    if msg.get("type") == "result":
-        agent_output = msg.get("result", "")
-    if msg.get("type") == "assistant" and msg.get("message"):
-        for block in msg["message"].get("content", []):
-            if isinstance(block, dict) and block.get("type") == "text":
-                text = block.get("text", "")
-                agent_output += text + "\n"
-                write_status("running", last_text=text[:200])
-            if isinstance(block, dict) and block.get("type") == "tool_use":
-                tool = block.get("name", "")
-                write_status("running", tool=tool)
-
-    return agent_output, session_id
-
-
-def run_agent(
-    prompt: str,
-    timeout: int = 600,
-    max_turns: int = 80,
-    allow_full_auto: bool = True,
-) -> dict:
-    """Spawn the configured local coding agent and stream output to the live log file."""
-    configured_runtime = os.getenv("OPENTRADEX_RUNTIME", "claude-code")
-    cmd, runner_name, use_stdin = build_runner_command(
-        configured_runtime,
-        prompt,
-        max_turns,
-        allow_full_auto=allow_full_auto,
-    )
+def run_agent(prompt: str, timeout: int = 600) -> dict:
+    """Spawn Codex CLI as a subprocess. Stream output to live log file."""
+    configured_runtime = os.getenv("OPENTRADEX_RUNTIME", "codex-cli")
+    cmd = [
+        "codex",
+        "exec",
+        "--json",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "-C", str(PROJECT_DIR),
+        "-",
+    ]
 
     env = {k: v for k, v in os.environ.items() if k not in {
         "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
@@ -379,8 +251,8 @@ def run_agent(
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     # Clear live log for this cycle
-    LIVE_LOG.write_text("", encoding="utf-8")
-    write_status("running", configured_runtime=configured_runtime, runner=runner_name)
+    LIVE_LOG.write_text("")
+    write_status("running", configured_runtime=configured_runtime, runner="codex-cli")
 
     start = time.time()
     session_id = None
@@ -389,17 +261,14 @@ def run_agent(
     try:
         proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL if configured_runtime == "codex-cli" else subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="ignore", env=env, cwd=str(PROJECT_DIR),
+            stderr=subprocess.PIPE, text=True, env=env, cwd=str(PROJECT_DIR),
         )
-        if use_stdin and proc.stdin:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        elif proc.stdin:
-            proc.stdin.close()
+        # Send prompt and close stdin
+        proc.stdin.write(prompt)
+        proc.stdin.close()
 
         # Stream stdout line by line to live log
-        with open(LIVE_LOG, "a", encoding="utf-8", errors="ignore") as logf:
+        with open(LIVE_LOG, "a") as logf:
             for line in proc.stdout:
                 line = line.strip()
                 if not line:
@@ -410,12 +279,38 @@ def run_agent(
 
                 try:
                     msg = json.loads(line)
-                    agent_output, session_id = consume_stream_event(
-                        configured_runtime,
-                        msg,
-                        agent_output,
-                        session_id,
-                    )
+                    if msg.get("type") == "thread.started" and "thread_id" in msg:
+                        session_id = msg["thread_id"]
+                    if msg.get("type") == "agent_message" and msg.get("message"):
+                        agent_output += msg["message"] + "\n"
+                        write_status("running", last_text=msg["message"][:200])
+                    if msg.get("type") == "item.completed":
+                        item = msg.get("item", {})
+                        item_type = item.get("type")
+                        if item_type == "agent_message":
+                            text = item.get("text", "")
+                            if text:
+                                agent_output += text + "\n"
+                                write_status("running", last_text=text[:200])
+                        if item_type == "reasoning":
+                            summary = item.get("summary") or []
+                            if summary:
+                                text = " ".join(
+                                    part.get("text", "") for part in summary if isinstance(part, dict)
+                                ).strip()
+                                if text:
+                                    write_status("running", last_text=text[:200])
+                        if item_type == "message":
+                            for content in item.get("content", []):
+                                if isinstance(content, dict) and content.get("type") == "output_text":
+                                    text = content.get("text", "")
+                                    if text:
+                                        agent_output += text + "\n"
+                                        write_status("running", last_text=text[:200])
+                    if msg.get("type") == "token_count" and msg.get("info"):
+                        write_status("running", token_count=msg["info"].get("total_token_usage"))
+                    if msg.get("type") == "exec_command_begin" and msg.get("call_id"):
+                        write_status("running", tool="exec_command", call_id=msg["call_id"])
                 except json.JSONDecodeError:
                     continue
 
@@ -424,6 +319,7 @@ def run_agent(
                     write_status("timeout")
                     return {"status": "timeout", "duration_s": timeout, "timestamp": _now()}
 
+        stderr_output = proc.stderr.read()
         proc.wait()
 
     except Exception as e:
@@ -438,7 +334,11 @@ def run_agent(
         "duration_s": duration,
         "session_id": session_id,
         "output": agent_output[:2000] if agent_output else "",
+        "error": _collect_stderr(stderr_output) if proc.returncode != 0 else "",
     }
+
+    if proc.returncode != 0 and _is_transient_codex_error(stderr_output):
+        cycle_result["status"] = "retryable_error"
 
     write_status("idle", last_cycle=duration)
 
@@ -493,39 +393,31 @@ def main():
 
     args = parser.parse_args()
     interval = args.interval or int(os.getenv("CYCLE_INTERVAL", "900"))
-    configured_runtime = os.getenv("OPENTRADEX_RUNTIME", "claude-code")
-
-    agent_max_turns = 80
-    allow_full_auto = True
+    configured_runtime = os.getenv("OPENTRADEX_RUNTIME", "codex-cli")
 
     if args.rationale:
         submit_rationale(args.rationale)
         prompt = build_rationale_prompt(args.rationale)
-    elif args.prompt:
-        prompt = args.prompt if configured_runtime == "codex-cli" else build_operator_prompt(args.prompt)
-        agent_max_turns = 16
-        allow_full_auto = False
     else:
-        prompt = build_cycle_prompt()
+        prompt = args.prompt or build_cycle_prompt()
 
     if args.dry_run:
         print(prompt)
         return
 
     print(f"[OpenTradex] Starting agent", file=sys.stderr)
-    print(f"  Runtime profile: {configured_runtime}", file=sys.stderr)
+    if configured_runtime != "codex-cli":
+        print(
+            f"  Runtime profile: {configured_runtime} (executing with Codex CLI runner)",
+            file=sys.stderr,
+        )
     print(f"  Mode: {'loop (' + str(interval) + 's)' if args.loop else 'single cycle'}", file=sys.stderr)
 
     while True:
         ts = datetime.now(timezone.utc).strftime('%H:%M:%S')
         print(f"\n[{ts}] Starting cycle...", file=sys.stderr)
 
-        result = run_agent(
-            prompt,
-            timeout=args.timeout,
-            max_turns=agent_max_turns,
-            allow_full_auto=allow_full_auto,
-        )
+        result = run_agent(prompt, timeout=args.timeout)
 
         print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Done: {result['status']} ({result['duration_s']}s)", file=sys.stderr)
         if result.get("output"):

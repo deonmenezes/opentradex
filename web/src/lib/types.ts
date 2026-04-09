@@ -8,6 +8,7 @@ export interface Portfolio {
   total_news: number;
   total_snapshots: number;
   total_cycles: number;
+  data_source?: string;
 }
 
 export interface Trade {
@@ -123,6 +124,8 @@ export interface WorkspaceSummary {
   integrations: string[];
   dashboardSurface: string;
   channels: string[];
+  executionRail?: string;
+  researchRails?: string[];
   tradingview: {
     enabled: boolean;
     watchlist: string[];
@@ -136,12 +139,29 @@ export interface WorkspaceSummary {
   };
 }
 
+export interface LiveReadinessCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface WorkspaceStatus {
+  workspace: WorkspaceSummary | null;
+  readiness: {
+    canArmLive: boolean;
+    checks: LiveReadinessCheck[];
+    balance?: number | null;
+    authProbeOk: boolean;
+    authProbeMessage: string;
+  };
+}
+
 export interface PromptEntry {
   id: string;
   text: string;
   channel: string;
   createdAt: string;
-  state?: "queued" | "sent";
 }
 
 export function kalshiUrl(ticker: string, title?: string): string {

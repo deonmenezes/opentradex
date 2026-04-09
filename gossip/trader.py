@@ -40,6 +40,45 @@ def get_db():
     return GossipDB()
 
 
+def execution_mode() -> str:
+    mode = os.getenv("OPENTRADEX_EXECUTION_MODE", "").strip().lower()
+    if mode in {"paper", "live"}:
+        return mode
+    return "live" if os.getenv("LIVE_TRADING", "false").strip().lower() == "true" else "paper"
+
+
+def live_trading_enabled() -> bool:
+    return execution_mode() == "live"
+
+
+def max_concurrent_positions() -> int:
+    return int(os.getenv("MAX_CONCURRENT_POSITIONS", "5"))
+
+
+def min_confidence_level() -> str:
+    return os.getenv("MIN_CONFIDENCE", "medium").strip().lower()
+
+
+def confidence_rank(confidence: str) -> int:
+    return {"low": 0, "medium": 1, "high": 2}.get(confidence.strip().lower(), 0)
+
+
+def credentials_available() -> bool:
+    api_key = os.getenv("KALSHI_API_KEY_ID", "").strip()
+    inline_key = os.getenv("KALSHI_PRIVATE_KEY", "").strip()
+    key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "").strip()
+    return bool(api_key and (inline_key or key_path))
+
+
+def validate_live_configuration() -> list[str]:
+    issues: list[str] = []
+    if not credentials_available():
+        issues.append("LIVE_TRADING requires KALSHI_API_KEY_ID and a private key")
+    if os.getenv("KALSHI_USE_DEMO", "false").strip().lower() == "true":
+        issues.append("LIVE_TRADING cannot use demo mode; set KALSHI_USE_DEMO=false")
+    return issues
+
+
 # --- State management ---
 
 @dataclass
@@ -122,6 +161,52 @@ def save_portfolio(p: Portfolio) -> None:
     TRADES_FILE.write_text(json.dumps(data, indent=2))
 
 
+def sync_portfolio_to_db(p: Portfolio) -> None:
+    """Keep SQLite aligned with JSON portfolio state for dashboard reads."""
+    db = get_db()
+    try:
+        db.conn.execute("DELETE FROM trades")
+        db.conn.execute("DELETE FROM portfolio")
+        db.conn.execute(
+            """INSERT INTO portfolio (id, bankroll, total_pnl, total_trades, wins, losses, updated_at)
+               VALUES (1, ?, ?, ?, ?, ?, ?)""",
+            (round(p.bankroll, 2), round(p.total_pnl, 2), p.total_trades, p.wins, p.losses, datetime.now(timezone.utc).isoformat()),
+        )
+        for t in p.trades:
+            db.conn.execute(
+                """INSERT INTO trades
+                   (timestamp, ticker, title, category, side, action, contracts, entry_price, cost, fee,
+                    estimated_prob, edge, confidence, reasoning, news_trigger, sources, settled, outcome,
+                    pnl, exit_reasoning)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    t.timestamp,
+                    t.ticker,
+                    t.title,
+                    t.category,
+                    t.side,
+                    t.action,
+                    t.contracts,
+                    t.entry_price,
+                    t.cost,
+                    t.fee,
+                    t.estimated_prob,
+                    t.edge,
+                    t.confidence,
+                    t.reasoning,
+                    t.news_trigger,
+                    json.dumps(t.sources),
+                    1 if t.settled else 0,
+                    t.outcome,
+                    t.pnl,
+                    t.exit_reasoning,
+                ),
+            )
+        db.conn.commit()
+    finally:
+        db.close()
+
+
 # --- Sizing ---
 
 def kalshi_fee(contracts: int, price: float) -> float:
@@ -185,7 +270,6 @@ def check_risk(portfolio: Portfolio, ticker: str, cost: float) -> dict:
     """Run risk checks before a trade."""
     issues = []
     max_pos_pct = float(os.getenv("MAX_POSITION_PCT", "0.30"))
-    min_edge = float(os.getenv("MIN_EDGE", "0.10"))
 
     if cost > portfolio.bankroll * max_pos_pct:
         issues.append(f"Position size ${cost:.2f} exceeds {max_pos_pct:.0%} of bankroll ${portfolio.bankroll:.2f}")
@@ -193,8 +277,9 @@ def check_risk(portfolio: Portfolio, ticker: str, cost: float) -> dict:
     if cost > portfolio.bankroll:
         issues.append(f"Insufficient bankroll: need ${cost:.2f}, have ${portfolio.bankroll:.2f}")
 
-    if len(portfolio.open_positions) >= 5:
-        issues.append(f"Max 5 concurrent positions reached ({len(portfolio.open_positions)} open)")
+    position_limit = max_concurrent_positions()
+    if len(portfolio.open_positions) >= position_limit:
+        issues.append(f"Max {position_limit} concurrent positions reached ({len(portfolio.open_positions)} open)")
 
     existing = [t for t in portfolio.open_positions if t.ticker == ticker]
     if existing:
@@ -215,7 +300,7 @@ async def execute_trade(
     news_trigger: str = "",
     sources: list[str] | None = None,
 ) -> dict:
-    from gossip.kalshi import get_market_detail, get_orderbook as fetch_orderbook, kalshi_fee as kfee
+    from gossip.kalshi import get_market_detail, get_orderbook as fetch_orderbook
 
     detail = await get_market_detail(ticker)
     market = detail.get("market", {})
@@ -274,6 +359,20 @@ async def execute_trade(
     if not risk["ok"]:
         return {"error": "Risk check failed", "issues": risk["issues"]}
 
+    min_edge = float(os.getenv("MIN_EDGE", "0.10"))
+    if edge < min_edge:
+        return {
+            "error": "Risk check failed",
+            "issues": [f"Edge {edge:.4f} is below MIN_EDGE {min_edge:.4f}"],
+        }
+
+    minimum_confidence = min_confidence_level()
+    if confidence_rank(confidence) < confidence_rank(minimum_confidence):
+        return {
+            "error": "Risk check failed",
+            "issues": [f"Confidence {confidence} is below minimum {minimum_confidence}"],
+        }
+
     price_detail = f"yes_bid={bid:.4f} yes_ask={ask:.4f} | entry={entry_price:.4f} ({side})"
     full_reasoning = f"{reasoning}\n[Prices at execution: {price_detail}]"
 
@@ -297,9 +396,12 @@ async def execute_trade(
     )
 
     # Live execution if enabled
-    live_trading = os.getenv("LIVE_TRADING", "false").lower() == "true"
+    live_trading = live_trading_enabled()
     order_result = None
     if live_trading:
+        config_issues = validate_live_configuration()
+        if config_issues:
+            return {"error": "Live trading misconfigured", "issues": config_issues, "mode": "live"}
         from gossip.kalshi import place_order
         price_cents = int(entry_price * 100)
         order_result = await place_order(
@@ -318,19 +420,10 @@ async def execute_trade(
     portfolio.bankroll = round(portfolio.bankroll - cost - fee, 2)
     portfolio.total_trades += 1
     save_portfolio(portfolio)
-
     try:
-        db = get_db()
-        db.insert_trade(
-            ticker=ticker, title=title, category=category, side=side,
-            contracts=contracts, entry_price=round(entry_price, 4),
-            cost=round(cost, 2), fee=round(fee, 4),
-            estimated_prob=estimated_prob, edge=round(edge, 4),
-            confidence=confidence, reasoning=full_reasoning,
-            news_trigger=news_trigger, sources=sources or [],
-        )
+        sync_portfolio_to_db(portfolio)
     except Exception as e:
-        log(f"DB write failed (trade still recorded in JSON): {e}")
+        log(f"DB sync failed after trade: {e}")
 
     return {
         "status": "executed",
@@ -353,7 +446,7 @@ async def execute_trade(
 
 
 async def exit_position(ticker: str, reasoning: str) -> dict:
-    from gossip.kalshi import get_market_detail
+    from gossip.kalshi import get_market_detail, place_order
 
     portfolio = load_portfolio()
     open_trade = None
@@ -372,10 +465,28 @@ async def exit_position(ticker: str, reasoning: str) -> dict:
 
     if open_trade.side == "yes":
         exit_price = bid
+        exit_side = "yes"
     else:
         exit_price = 1.0 - ask
+        exit_side = "no"
 
     pnl = round((exit_price - open_trade.entry_price) * open_trade.contracts, 2)
+
+    order_result = None
+    if live_trading_enabled():
+        config_issues = validate_live_configuration()
+        if config_issues:
+            return {"error": "Live trading misconfigured", "issues": config_issues, "mode": "live"}
+        order_result = await place_order(
+            ticker=ticker,
+            action="sell",
+            side=exit_side,
+            count=open_trade.contracts,
+            price_cents=int(exit_price * 100),
+            order_type="limit",
+        )
+        if "error" in order_result:
+            return {"error": f"Live exit failed: {order_result}", "mode": "live"}
 
     open_trade.settled = True
     open_trade.outcome = "win" if pnl > 0 else "loss"
@@ -390,6 +501,10 @@ async def exit_position(ticker: str, reasoning: str) -> dict:
         portfolio.losses += 1
 
     save_portfolio(portfolio)
+    try:
+        sync_portfolio_to_db(portfolio)
+    except Exception as e:
+        log(f"DB sync failed after exit: {e}")
 
     return {
         "status": "exited",
@@ -397,10 +512,15 @@ async def exit_position(ticker: str, reasoning: str) -> dict:
         "pnl": pnl,
         "exit_price": exit_price,
         "bankroll": portfolio.bankroll,
+        "mode": execution_mode(),
+        "order": order_result,
     }
 
 
 def settle_market(ticker: str, outcome_yes: bool) -> dict:
+    if live_trading_enabled():
+        return {"error": "Manual settle is disabled in live mode; use check-settled against exchange state"}
+
     portfolio = load_portfolio()
 
     for t in reversed(portfolio.trades):
@@ -419,6 +539,10 @@ def settle_market(ticker: str, outcome_yes: bool) -> dict:
             portfolio.total_pnl = round(portfolio.total_pnl + t.pnl, 2)
             portfolio.bankroll = round(portfolio.bankroll + t.entry_price * t.contracts + t.pnl, 2)
             save_portfolio(portfolio)
+            try:
+                sync_portfolio_to_db(portfolio)
+            except Exception as e:
+                log(f"DB sync failed after settle: {e}")
 
             return {
                 "status": "settled",
@@ -469,6 +593,10 @@ async def check_settlements() -> list[dict]:
 
     if settled:
         save_portfolio(portfolio)
+        try:
+            sync_portfolio_to_db(portfolio)
+        except Exception as e:
+            log(f"DB sync failed after auto-settle: {e}")
     return settled
 
 
@@ -571,6 +699,7 @@ async def main():
                 }
                 for t in p.open_positions
             ],
+            "mode": execution_mode(),
         }
         print(json.dumps(result, indent=2))
 
