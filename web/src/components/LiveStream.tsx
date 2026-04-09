@@ -24,7 +24,6 @@ interface LiveStreamProps {
   liveStatus: string;
   customPrompt: string;
   prompts: PromptEntry[];
-  queuedPrompts: PromptEntry[];
   workspace: WorkspaceSummary | null;
   onCustomPromptChange: (value: string) => void;
   onSendCommand: (prompt: string, channel: string) => void;
@@ -108,7 +107,6 @@ export function LiveStream({
   liveStatus,
   customPrompt,
   prompts,
-  queuedPrompts,
   workspace,
   onCustomPromptChange,
   onSendCommand,
@@ -290,30 +288,6 @@ export function LiveStream({
           </ScrollArea>
 
           <div className="border-t border-[#4f3042] bg-[#1b0c18]/80 px-4 py-3">
-            {queuedPrompts.length > 0 ? (
-              <div className="mb-3 rounded-[1rem] border border-[#654154] bg-[#2a1121] px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-[#84586f] bg-[#3b1730] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[#f3a96f]">
-                    queue
-                  </span>
-                  <span className="text-[12px] text-[#f4dfea]/84">
-                    {queuedPrompts.length} prompt{queuedPrompts.length === 1 ? "" : "s"} waiting for the current pass to finish.
-                  </span>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {queuedPrompts.map((prompt) => (
-                    <span
-                      key={prompt.id}
-                      className="rounded-full border border-[#724b62] bg-[#4a2038]/58 px-3 py-1 text-[11px] text-[#f4dfea]/78"
-                    >
-                      {prompt.channel}: {prompt.text.slice(0, 72)}
-                      {prompt.text.length > 72 ? "..." : ""}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
             <div className="mb-3 flex flex-wrap gap-2">
               {quickPrompts.map((prompt) => (
                 <button
@@ -545,7 +519,7 @@ function buildMessages(prompts: PromptEntry[], lines: StreamLine[]): ChatMessage
     id: prompt.id,
     role: "user",
     channel: (prompt.channel as ChannelId) || "command",
-    body: prompt.state === "queued" ? `${prompt.text}\n\n_Queued until the current run finishes._` : prompt.text,
+    body: prompt.text,
     createdAt: prompt.createdAt,
   }));
 

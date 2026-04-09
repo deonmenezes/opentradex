@@ -2,13 +2,10 @@
 
 import { useRef, useEffect, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Rss, ExternalLink, FolderGit2, Heart, Repeat2, MessageCircle, Loader2, ArrowBigUp, ChevronUp, ChevronDown, Play } from "lucide-react";
+import { Rss, ExternalLink, Heart, Repeat2, MessageCircle, Loader2, ArrowBigUp, ChevronUp, ChevronDown, Play } from "lucide-react";
 import type { NewsArticle, SocialPost } from "@/lib/types";
 
 type Tab = "news" | "twitter" | "truth" | "reddit" | "tiktok";
-
-const COMMUNITY_REPO_URL = "https://github.com/deonmenezes/opentradex";
-const COMMUNITY_DISCORD_URL = "https://discord.gg/rFdwJC8z";
 
 interface NewsFeedProps {
   news: NewsArticle[];
@@ -64,28 +61,6 @@ export function NewsFeed({ news, tweets, truthPosts, redditPosts, tiktokPosts, l
             </span>
           </div>
         </div>
-        <div className="space-y-2 px-2 pb-2">
-          <CommunityLinkCard
-            href={COMMUNITY_REPO_URL}
-            eyebrow="Repository"
-            title="Open the real GitHub repo"
-            description="Browse the live OpenTradex source, CLI, dashboard, and deploy history."
-            icon={FolderGit2}
-            iconClassName="border-slate-900/15 bg-white/85 text-slate-900"
-            className="border-slate-900/12 bg-[linear-gradient(135deg,rgba(15,23,42,0.08),rgba(51,65,85,0.04))] hover:border-slate-900/20 hover:bg-[linear-gradient(135deg,rgba(15,23,42,0.12),rgba(51,65,85,0.08))]"
-            eyebrowClassName="text-slate-700/72"
-          />
-          <CommunityLinkCard
-            href={COMMUNITY_DISCORD_URL}
-            eyebrow="Community"
-            title="Join the OpenTradex Discord"
-            description="Ask questions, share setups, and follow product updates with the operator crew."
-            icon={MessageCircle}
-            iconClassName="border-indigo-500/20 bg-white/80 text-indigo-700"
-            className="border-indigo-500/20 bg-[linear-gradient(135deg,rgba(99,102,241,0.12),rgba(20,184,166,0.08))] hover:border-indigo-500/35 hover:bg-[linear-gradient(135deg,rgba(99,102,241,0.18),rgba(20,184,166,0.14))]"
-            eyebrowClassName="text-indigo-700/80"
-          />
-        </div>
         <div className="flex px-1 pb-1 gap-0.5">
           {tabs.map((t) => (
             <button
@@ -116,51 +91,6 @@ export function NewsFeed({ news, tweets, truthPosts, redditPosts, tiktokPosts, l
         </ScrollArea>
       </div>
     </div>
-  );
-}
-
-function CommunityLinkCard({
-  href,
-  eyebrow,
-  title,
-  description,
-  icon: Icon,
-  className,
-  iconClassName,
-  eyebrowClassName,
-}: {
-  href: string;
-  eyebrow: string;
-  title: string;
-  description: string;
-  icon: typeof FolderGit2;
-  className: string;
-  iconClassName: string;
-  eyebrowClassName: string;
-}) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`group flex items-center justify-between rounded-2xl border px-3 py-2.5 transition-colors ${className}`}
-    >
-      <div className="min-w-0">
-        <p className={`text-[10px] font-medium uppercase tracking-[0.24em] ${eyebrowClassName}`}>
-          {eyebrow}
-        </p>
-        <p className="mt-1 text-sm font-medium text-slate-900">
-          {title}
-        </p>
-        <p className="mt-1 text-[11px] leading-5 text-slate-600">
-          {description}
-        </p>
-      </div>
-      <div className={`ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-transform group-hover:scale-105 ${iconClassName}`}>
-        <Icon className="h-4 w-4" />
-        <ExternalLink className="ml-[-2px] h-3 w-3 opacity-70" />
-      </div>
-    </a>
   );
 }
 

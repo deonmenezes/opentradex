@@ -8,6 +8,7 @@ import { PortfolioStrip } from "@/components/PortfolioStrip";
 import { PositionsPanel } from "@/components/PositionsPanel";
 import { TopBar } from "@/components/TopBar";
 import type {
+  LiveReadinessCheck,
   Market,
   NewsArticle,
   Portfolio,
@@ -17,6 +18,7 @@ import type {
   StreamLine,
   Trade,
   WorkspaceSummary,
+  WorkspaceStatus,
 } from "@/lib/types";
 
 const SHOW_PNL = false;
@@ -28,7 +30,11 @@ export function DashboardApp() {
   const [liveNews, setLiveNews] = useState<NewsArticle[]>([]);
   const [markets, setMarkets] = useState<Market[]>([]);
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
-  const [rationale, setRationale] = useState("");
+  const [readinessChecks, setReadinessChecks] = useState<LiveReadinessCheck[]>([]);
+  const [canArmLive, setCanArmLive] = useState(false);
+  const [authProbeMessage, setAuthProbeMessage] = useState("");
+  const [liveBalance, setLiveBalance] = useState<number | null>(null);
+  const [modeBusy, setModeBusy] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
   const [agentStatus, setAgentStatus] = useState("");
   const [loopInterval, setLoopInterval] = useState(900);
@@ -44,16 +50,51 @@ export function DashboardApp() {
   const [loadingReddit, setLoadingReddit] = useState(true);
   const [loadingTiktok, setLoadingTiktok] = useState(true);
   const [promptHistory, setPromptHistory] = useState<PromptEntry[]>([]);
-  const [queuedPrompts, setQueuedPrompts] = useState<PromptEntry[]>([]);
   const streamOffset = useRef(0);
 
   const fetchWorkspace = useCallback(async () => {
     try {
       const res = await fetch("/api/workspace");
-      const data = await res.json();
-      setWorkspace(data);
+      const data: WorkspaceStatus = await res.json();
+      setWorkspace(data.workspace);
+      setReadinessChecks(data.readiness?.checks || []);
+      setCanArmLive(Boolean(data.readiness?.canArmLive));
+      setAuthProbeMessage(data.readiness?.authProbeMessage || "");
+      setLiveBalance(data.readiness?.balance ?? null);
     } catch {
       // ignore
+    }
+  }, []);
+
+  const setExecutionMode = useCallback(async (mode: "paper" | "live") => {
+    setModeBusy(true);
+    try {
+      const res = await fetch("/api/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_mode", mode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAgentStatus(data.error || "Could not change execution mode");
+        if (data.readiness) {
+          setReadinessChecks(data.readiness.checks || []);
+          setCanArmLive(Boolean(data.readiness.canArmLive));
+          setAuthProbeMessage(data.readiness.authProbeMessage || "");
+          setLiveBalance(data.readiness.balance ?? null);
+        }
+        return;
+      }
+      setWorkspace(data.workspace);
+      setReadinessChecks(data.readiness?.checks || []);
+      setCanArmLive(Boolean(data.readiness?.canArmLive));
+      setAuthProbeMessage(data.readiness?.authProbeMessage || "");
+      setLiveBalance(data.readiness?.balance ?? null);
+      setAgentStatus(mode === "live" ? "Live mode armed." : "Paper mode armed.");
+    } catch {
+      setAgentStatus("Could not change execution mode");
+    } finally {
+      setModeBusy(false);
     }
   }, []);
 
@@ -259,15 +300,26 @@ export function DashboardApp() {
       }
     };
 
-    pollStream();
     const id = setInterval(pollStream, 1_000);
     return () => clearInterval(id);
   }, []);
 
   const mergedNews = mergeNews(news, liveNews);
 
-  const dispatchCycle = useCallback(async (prompt?: string, channel = "command") => {
+  const runCycle = async (prompt?: string, channel = "command") => {
     const cleanPrompt = prompt?.trim();
+    if (cleanPrompt) {
+      setPromptHistory((prev) => [
+        ...prev.slice(-7),
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          text: cleanPrompt,
+          channel,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    }
+
     setAgentStatus(cleanPrompt ? `Routing ${channel} request...` : "Starting cycle...");
     setStreamLines([]);
     streamOffset.current = 0;
@@ -282,53 +334,7 @@ export function DashboardApp() {
     });
     const data = await res.json();
     setAgentStatus(data.message || data.status);
-  }, [workspace]);
-
-  const runCycle = useCallback(async (prompt?: string, channel = "command") => {
-    const cleanPrompt = prompt?.trim();
-    const entry: PromptEntry | null = cleanPrompt
-      ? {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          text: cleanPrompt,
-          channel,
-          createdAt: new Date().toISOString(),
-          state: liveStatus === "running" ? "queued" : "sent",
-        }
-      : null;
-
-    if (entry) {
-      setPromptHistory((prev) => [...prev.slice(-11), entry]);
-    }
-
-    if (liveStatus === "running") {
-      if (entry) {
-        setQueuedPrompts((prev) => [...prev.slice(-5), entry]);
-        setAgentStatus(`Agent busy. Queued ${channel} request (${queuedPrompts.length + 1} waiting).`);
-      } else {
-        setAgentStatus("Agent already running. Let this pass finish before starting another full cycle.");
-      }
-      return;
-    }
-
-    await dispatchCycle(cleanPrompt, channel);
-  }, [dispatchCycle, liveStatus, queuedPrompts.length]);
-
-  useEffect(() => {
-    if (liveStatus === "running" || queuedPrompts.length === 0) {
-      return;
-    }
-
-    const [nextPrompt, ...remaining] = queuedPrompts;
-    setQueuedPrompts(remaining);
-    setPromptHistory((prev) =>
-      prev.map((item) => (
-        item.id === nextPrompt.id
-          ? { ...item, state: "sent" }
-          : item
-      ))
-    );
-    void dispatchCycle(nextPrompt.text, nextPrompt.channel);
-  }, [dispatchCycle, liveStatus, queuedPrompts]);
+  };
 
   const startLoop = async () => {
     setAgentStatus(`Starting loop (${loopInterval}s)...`);
@@ -341,45 +347,20 @@ export function DashboardApp() {
     setAgentStatus(`Loop: ${data.interval}s interval`);
   };
 
-  const submitRationale = async () => {
-    if (!rationale.trim()) return;
-
-    const thesis = rationale.trim();
-    setPromptHistory((prev) => [
-      ...prev.slice(-7),
-      {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        text: thesis,
-        channel: "command",
-        createdAt: new Date().toISOString(),
-        state: "sent",
-      },
-    ]);
-    setAgentStatus("Researching thesis...");
-
-    const res = await fetch("/api/agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "submit_rationale", rationale: thesis }),
-    });
-    const data = await res.json();
-    setAgentStatus(data.message || data.status);
-    setRationale("");
-  };
-
   return (
     <div className="dashboard-shell h-screen w-screen max-w-full overflow-hidden bg-background">
       <div className="flex h-full min-h-0 flex-col">
         <TopBar
           workspace={workspace}
+          readinessChecks={readinessChecks}
+          canArmLive={canArmLive}
+          authProbeMessage={authProbeMessage}
+          liveBalance={liveBalance}
+          modeBusy={modeBusy}
           liveStatus={liveStatus}
           agentStatus={agentStatus}
-          queuedCount={queuedPrompts.length}
-          rationale={rationale}
           loopInterval={loopInterval}
-          onRationaleChange={setRationale}
-          onSubmitRationale={submitRationale}
-          onRunCycle={() => void runCycle()}
+          onRunCycle={() => runCycle()}
           onStartLoop={startLoop}
           onRefresh={() => {
             fetchWorkspace();
@@ -387,6 +368,7 @@ export function DashboardApp() {
             fetchLiveNews();
           }}
           onLoopIntervalChange={setLoopInterval}
+          onSetExecutionMode={setExecutionMode}
         />
 
         <PortfolioStrip
@@ -414,11 +396,10 @@ export function DashboardApp() {
               liveStatus={liveStatus}
               customPrompt={customPrompt}
               prompts={promptHistory}
-              queuedPrompts={queuedPrompts}
               workspace={workspace}
               onCustomPromptChange={setCustomPrompt}
               onSendCommand={(prompt, channel) => {
-                void runCycle(prompt, channel);
+                runCycle(prompt, channel);
                 setCustomPrompt("");
               }}
             />

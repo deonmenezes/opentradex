@@ -29,6 +29,14 @@ export function PortfolioStrip({ portfolio, unrealizedPnl = 0 }: PortfolioStripP
   const winRate = settled > 0
     ? ((portfolio.wins / settled) * 100).toFixed(0)
     : null;
+  const sourceLabel =
+    portfolio.data_source === "kalshi_live"
+      ? "LIVE KALSHI"
+      : portfolio.data_source === "paper_local"
+        ? "PAPER LEDGER"
+        : portfolio.data_source === "paper_fallback"
+          ? "FALLBACK"
+          : null;
 
   return (
     <div className="h-[72px] flex items-center gap-6 px-6 border-b border-border bg-card/30 shrink-0 overflow-hidden">
@@ -59,6 +67,11 @@ export function PortfolioStrip({ portfolio, unrealizedPnl = 0 }: PortfolioStripP
           {pnlPositive ? "+" : ""}
           ${Math.abs(portfolio.total_pnl).toFixed(2)}
         </div>
+        {sourceLabel && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-secondary/60 text-muted-foreground">
+            {sourceLabel}
+          </div>
+        )}
       </div>
 
       {unrealizedPnl !== 0 && (
