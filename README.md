@@ -1,23 +1,44 @@
 # OpenTradex
 
-Lightweight AI trading harness for prediction markets, stocks, and crypto. Zero dependencies, paper-first design, runs anywhere Node 18+ or Bun works.
+Lightweight AI trading harness for prediction markets, stocks, and crypto. Includes a beautiful Command Cockpit dashboard and cross-platform desktop app. Paper-first design, runs anywhere.
+
+![Dashboard Preview](docs/dashboard-preview.png)
 
 ## Features
 
-- **Multi-Market Support**: Kalshi, Polymarket, Alpaca (stocks), crypto via CoinGecko/Kraken
-- **Paper-First**: Default to paper trading, easily switchable to live
-- **Risk Engine**: Hard-coded caps, daily loss limits, kill switches
-- **Local Gateway**: HTTP API for AI agents to call
-- **Mode Lock**: `paper-only` / `paper-default` / `live-allowed` - choose your safety level
+- **Command Cockpit Dashboard** - Dark-themed trading interface inspired by professional terminals
+- **Desktop App** - Native Windows/Mac app for Microsoft Store and Mac App Store
+- **Multi-Market Support** - Kalshi, Polymarket, Alpaca (stocks), crypto via CoinGecko/Kraken
+- **Paper-First** - Default to paper trading, easily switchable to live
+- **Risk Engine** - Hard-coded caps, daily loss limits, kill switches
+- **IP-Enabled Gateway** - Remote access with bearer token auth for VMs/servers
+- **Real-time Updates** - SSE-based live feed for positions, trades, and news
 
 ## Install
 
+### NPM Package (CLI + Gateway + Web UI)
+
 ```bash
 npm install -g opentradex
-# or
-bun add -g opentradex
-# or use npx
-npx opentradex
+opentradex onboard --paper-only
+opentradex run
+```
+
+### Desktop App
+
+Download from:
+- **Windows**: Microsoft Store or [GitHub Releases](https://github.com/deonmenezes/opentradex/releases)
+- **macOS**: Mac App Store or [GitHub Releases](https://github.com/deonmenezes/opentradex/releases)
+- **Linux**: AppImage, deb, or snap
+
+### From Source
+
+```bash
+git clone https://github.com/deonmenezes/opentradex.git
+cd opentradex
+npm install
+npm run build:all
+npm run ui
 ```
 
 ## Quick Start
@@ -25,148 +46,112 @@ npx opentradex
 ### 1. Onboard (first time setup)
 
 ```bash
-# Safe mode - paper trading only, can never switch to live
-opentradex onboard --paper-only
-
-# Or interactive setup with more options
-opentradex onboard
+opentradex onboard --paper-only  # Safe mode - paper only forever
+opentradex onboard               # Interactive setup
 ```
-
-The wizard walks you through:
-1. Trading mode selection
-2. Network bind mode (local/lan/tunnel)
-3. Rail credentials (Kalshi, Polymarket, Alpaca)
-4. Risk profile configuration
-5. AI model selection
 
 ### 2. Run the Gateway
 
 ```bash
 opentradex run
+# Gateway at http://localhost:3210
 ```
 
-This starts the HTTP gateway at `http://localhost:3210` (configurable).
-
-### 3. Query Markets
+### 3. Launch Dashboard
 
 ```bash
-# Scan all markets
-opentradex scan
-
-# Scan specific exchange
-opentradex scan kalshi 20
-
-# Search across all exchanges
-opentradex search "bitcoin"
-
-# Get quote with orderbook
-opentradex quote crypto BTC
+npm run ui
+# Dashboard at http://localhost:3000
 ```
 
-### 4. Emergency Stop
+Or use the desktop app for a native experience.
+
+## Dashboard
+
+The Command Cockpit dashboard provides:
+
+- **Top Bar**: Status indicators, capital/P&L, cycle controls, auto-loop
+- **Left Sidebar**: Open positions, recent trades, market scanner
+- **Center**: Messaging channels with AI chat interface
+- **Right Sidebar**: Live feed from news sources and social media
+
+### Mission Cards
+
+Quick-start prompts to interact with the harness:
+- **Connector Audit** - Check which rails and feeds are configured
+- **Cross-Market Scan** - Find overlapping setups across exchanges
+- **TradingView Pass** - Focus on specific watchlist symbols
+
+## Remote Access
+
+OpenTradex supports IP-enabled remote access for running on VMs or servers:
 
 ```bash
-opentradex panic
+# During onboard, select "lan" or "tunnel" bind mode
+opentradex onboard
+
+# Or configure manually in ~/.opentradex/config.json
+{
+  "bindMode": "lan",  // or "tunnel"
+  "port": 3210
+}
 ```
 
-Flattens all positions and halts trading.
+When bind mode is not `local`, a bearer token is required:
+- Generated during onboard and printed once
+- Pass via `Authorization: Bearer <token>` header
+- Or via `?token=<token>` query parameter
 
-## Trading Modes
+## Desktop App
 
-| Mode | Behavior | Live Flip |
-|------|----------|-----------|
-| `paper-only` | All trades go to paper endpoints. Cannot switch to live. | None - must re-onboard |
-| `paper-default` | Starts paper, can flip to live after 24h demo | CLI + email code |
-| `live-allowed` | Can trade live immediately (power user) | Direct |
-
-The mode is locked in `~/.opentradex/mode.lock` and enforced by both the Execute loop and rail clients.
-
-## Gateway API
-
-Start with `opentradex run`, then:
-
-| Endpoint | Params | Description |
-|----------|--------|-------------|
-| `GET /` | - | Health check, list exchanges |
-| `GET /scan` | `exchange?`, `limit?` | Scan markets |
-| `GET /search` | `q`, `exchange?` | Search markets |
-| `GET /quote` | `exchange`, `symbol` | Get quote + orderbook |
-| `GET /orderbook` | `exchange`, `symbol` | Raw orderbook |
-
-### Example
+Build the desktop app locally:
 
 ```bash
-curl http://localhost:3210/scan?exchange=kalshi&limit=10
-curl http://localhost:3210/search?q=bitcoin
-curl http://localhost:3210/quote?exchange=crypto&symbol=BTC
+# Windows
+npm run build:desktop:win
+
+# macOS
+npm run build:desktop:mac
+
+# All platforms
+npm run build:desktop
 ```
 
-## Library Usage
+Output in `packages/desktop/release/`.
 
-```typescript
-import { createHarness } from 'opentradex';
+### Store Publishing
 
-const harness = createHarness({
-  kalshi: { demo: true },
-  alpaca: { paper: true },
-});
+The app is configured for:
+- **Microsoft Store** - via APPX package
+- **Mac App Store** - via MAS target with entitlements
+- **Linux** - AppImage, deb, snap
 
-// Scan all markets
-const markets = await harness.scanAll(10);
+## API Reference
 
-// Search
-const results = await harness.searchAll('tariffs');
+### Gateway Endpoints
 
-// Get specific exchange
-const kalshi = harness.exchange('kalshi');
-const quote = await kalshi.quote('TICKER-123');
-```
+| Endpoint | Method | Params | Description |
+|----------|--------|--------|-------------|
+| `GET /` | GET | - | Health + status |
+| `GET /events` | GET | - | SSE stream for real-time updates |
+| `GET /scan` | GET | `exchange?`, `limit?` | Scan markets |
+| `GET /search` | GET | `q`, `exchange?` | Search markets |
+| `GET /quote` | GET | `exchange`, `symbol` | Quote + orderbook |
+| `GET /risk` | GET | - | Risk state |
+| `POST /command` | POST | `{command}` | Send command to harness |
+| `POST /panic` | POST | - | Emergency stop |
+| `GET /config` | GET | - | Current config (no secrets) |
 
-## Supported Exchanges
+### SSE Events
 
-| Exchange | Type | Features |
-|----------|------|----------|
-| `kalshi` | Prediction Market | Events, elections, orderbook |
-| `polymarket` | Prediction Market | Crypto-native, CLOB |
-| `alpaca` | Stocks/ETFs | Paper + live, US markets |
-| `tradingview` | Stocks | Yahoo Finance data |
-| `crypto` | Cryptocurrency | CoinGecko + Kraken orderbook |
+Connect to `/events` for real-time updates:
 
-## Risk Engine
-
-Hard-coded safety rails that never consult the LLM:
-
-- **Max Position Size**: Configurable USD cap per position
-- **Max Daily Loss**: Halt trading when limit reached
-- **Max Open Positions**: Limit concurrent positions
-- **Daily Drawdown Kill**: Emergency halt at X% drawdown
-- **Kelly Sizing**: Built-in position sizing with quarter-Kelly default
-
-```bash
-# Check risk state
-opentradex risk
-```
-
-## Configuration
-
-Config stored in `~/.opentradex/`:
-
-```
-~/.opentradex/
-├── config.json     # Main configuration
-├── mode.lock       # Trading mode (paper-only/paper-default/live-allowed)
-├── auth.json       # Hashed auth token for remote access
-├── audit/          # Trade audit logs (YYYY-MM-DD.jsonl)
-└── skills/         # Custom trading skills (*.md)
-```
-
-### Commands
-
-```bash
-opentradex config path    # Show config directory
-opentradex config show    # Dump full config
-opentradex config mode    # Show trading mode
-opentradex status         # Formatted status view
+```javascript
+const es = new EventSource('http://localhost:3210/events');
+es.onmessage = (e) => {
+  const { type, payload } = JSON.parse(e.data);
+  // type: 'position' | 'trade' | 'feed' | 'command' | 'panic' | 'heartbeat'
+};
 ```
 
 ## Architecture
@@ -179,37 +164,85 @@ opentradex/
 │   ├── config.ts         # Config management + mode lock
 │   ├── risk.ts           # Risk engine + Kelly sizing
 │   ├── onboard.ts        # Interactive setup wizard
-│   ├── markets/
-│   │   ├── base.ts       # HTTP utilities
-│   │   ├── kalshi.ts     # Kalshi connector
-│   │   ├── polymarket.ts # Polymarket connector
-│   │   ├── alpaca.ts     # Alpaca connector
-│   │   ├── tradingview.ts # Stocks via Yahoo
-│   │   └── crypto.ts     # CoinGecko + Kraken
+│   ├── markets/          # Exchange connectors
+│   │   ├── kalshi.ts
+│   │   ├── polymarket.ts
+│   │   ├── alpaca.ts
+│   │   ├── tradingview.ts
+│   │   └── crypto.ts
 │   ├── gateway/
-│   │   └── index.ts      # HTTP gateway server
+│   │   └── index.ts      # HTTP gateway with SSE
 │   └── bin/
 │       └── cli.ts        # CLI entry point
+├── packages/
+│   ├── dashboard/        # React + Vite + Tailwind dashboard
+│   │   ├── src/
+│   │   │   ├── components/
+│   │   │   │   ├── TopBar.tsx
+│   │   │   │   ├── LeftSidebar.tsx
+│   │   │   │   ├── ChatCockpit.tsx
+│   │   │   │   └── RightSidebar.tsx
+│   │   │   └── hooks/
+│   │   │       └── useHarness.ts
+│   │   └── package.json
+│   └── desktop/          # Electron desktop app
+│       ├── src/
+│       │   ├── main.ts
+│       │   └── preload.ts
+│       └── package.json
 ```
 
-## For AI Agents
+## Trading Modes
 
-This harness is designed to be called by AI agents:
+| Mode | Behavior | Live Flip |
+|------|----------|-----------|
+| `paper-only` | All trades go to paper endpoints | None - must re-onboard |
+| `paper-default` | Starts paper, can flip after 24h | CLI + email code |
+| `live-allowed` | Can trade live immediately | Direct |
 
-1. **Start gateway**: `opentradex run`
-2. **Agent makes HTTP calls** to `localhost:3210`
-3. **All responses are JSON** for easy parsing
+## Supported Exchanges
 
-The LLM is the **strategist** (decides what to trade), but the harness is the **executor** (enforces risk, routes to paper/live).
+| Exchange | Type | Features |
+|----------|------|----------|
+| `kalshi` | Prediction Market | Events, elections, orderbook |
+| `polymarket` | Prediction Market | Crypto-native, CLOB |
+| `alpaca` | Stocks/ETFs | Paper + live, US markets |
+| `tradingview` | Stocks | Yahoo Finance data |
+| `crypto` | Cryptocurrency | CoinGecko + Kraken orderbook |
 
-## Roadmap
+## Color Palette
 
-- [ ] WebSocket streaming for real-time data
-- [ ] Think loop integration with pi-agent-core
-- [ ] Feed layer (X, Reddit, RSS)
-- [ ] Dashboard UI
-- [ ] Slack/Discord alerts (opentradex-mouth)
-- [ ] Cloudflare Tunnel integration
+The dashboard uses a dark theme optimized for trading:
+
+| Token | Hex | Use |
+|-------|-----|-----|
+| `--bg` | `#0B0F14` | App background |
+| `--surface` | `#121821` | Cards |
+| `--surface-2` | `#1A2230` | Inset panels |
+| `--border` | `#222C3B` | Hairlines |
+| `--text` | `#E6EDF3` | Primary text |
+| `--text-dim` | `#8B97A8` | Secondary |
+| `--accent` | `#3FB68B` | Positive / brand |
+| `--danger` | `#E5484D` | Negative P&L |
+
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Build core
+npm run build
+
+# Build dashboard
+npm run build:dashboard
+
+# Run dashboard in dev mode
+npm run dev:dashboard
+
+# Run desktop app in dev mode
+npm run desktop
+```
 
 ## License
 

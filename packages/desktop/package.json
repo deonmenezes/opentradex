@@ -1,0 +1,94 @@
+{
+  "name": "@opentradex/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenTradex Desktop App - Trading Command Cockpit",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "tsc && electron-builder",
+    "build:win": "tsc && electron-builder --win",
+    "build:mac": "tsc && electron-builder --mac",
+    "build:linux": "tsc && electron-builder --linux",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.opentradex.desktop",
+    "productName": "OpenTradex",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dashboard/dist/client",
+        "to": "dashboard"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "appx",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "publisherName": "OpenTradex"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "mas",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.finance",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "linux": {
+      "target": ["AppImage", "deb", "snap"],
+      "icon": "assets/icon.png",
+      "category": "Finance"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "appx": {
+      "identityName": "OpenTradex",
+      "displayName": "OpenTradex",
+      "publisher": "CN=OpenTradex",
+      "publisherDisplayName": "OpenTradex"
+    },
+    "mas": {
+      "entitlements": "entitlements.mas.plist",
+      "entitlementsInherit": "entitlements.mas.inherit.plist"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0",
+    "typescript": "^5.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deonmenezes/opentradex.git",
+    "directory": "packages/desktop"
+  }
+}
