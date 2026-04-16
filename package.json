@@ -1,0 +1,47 @@
+{
+  "name": "opentradex",
+  "version": "0.1.0",
+  "description": "Lightweight AI harness connecting prediction markets, crypto, and stocks",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "opentradex": "dist/bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./gateway": {
+      "import": "./dist/gateway/index.js",
+      "types": "./dist/gateway/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/bin/cli.js",
+    "gateway": "node dist/bin/cli.js serve",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "keywords": [
+    "trading",
+    "prediction-markets",
+    "kalshi",
+    "polymarket",
+    "tradingview",
+    "crypto",
+    "ai-harness"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
