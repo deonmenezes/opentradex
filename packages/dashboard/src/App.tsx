@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import TopBar from './components/TopBar';
 import LeftSidebar from './components/LeftSidebar';
 import ChatCockpit from './components/ChatCockpit';
@@ -6,13 +6,13 @@ import RightSidebar from './components/RightSidebar';
 import { useHarness } from './hooks/useHarness';
 
 export default function App() {
-  const { status, positions, trades, markets, feed, sendCommand } = useHarness();
+  const { status, positions, trades, markets, feed, sendCommand, runCycle, toggleAutoLoop } = useHarness();
   const [selectedChannel, setSelectedChannel] = useState<string>('command');
 
   return (
     <div className="h-screen w-screen flex flex-col bg-bg overflow-hidden">
       {/* Top Bar */}
-      <TopBar status={status} />
+      <TopBar status={status} onRunCycle={runCycle} onToggleAutoLoop={toggleAutoLoop} />
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">

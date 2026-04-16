@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "OpenTradex Desktop App - Trading Command Cockpit",
+  "author": "deonmenezes",
   "main": "dist/main.js",
   "scripts": {
     "dev": "electron .",
@@ -82,7 +83,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "electron": "^31.0.0",
+    "electron": "31.0.0",
     "electron-builder": "^24.13.0",
     "typescript": "^5.4.0"
   },

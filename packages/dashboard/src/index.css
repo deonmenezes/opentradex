@@ -162,3 +162,113 @@ input::placeholder, textarea::placeholder {
 .glow-accent {
   box-shadow: 0 0 20px rgba(63, 182, 139, 0.3);
 }
+
+/* Enhanced transitions */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Price flash animations */
+@keyframes priceUp {
+  0% { background-color: rgba(63, 182, 139, 0.3); }
+  100% { background-color: transparent; }
+}
+
+@keyframes priceDown {
+  0% { background-color: rgba(229, 72, 77, 0.3); }
+  100% { background-color: transparent; }
+}
+
+.price-flash-up {
+  animation: priceUp 0.5s ease-out;
+}
+
+.price-flash-down {
+  animation: priceDown 0.5s ease-out;
+}
+
+/* Smooth number transitions */
+.number-transition {
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+/* Card lift effect */
+.card-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* Pulse ring for live indicators */
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(63, 182, 139, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(63, 182, 139, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(63, 182, 139, 0); }
+}
+
+.pulse-ring {
+  animation: pulseRing 2s infinite;
+}
+
+/* Better scrollbar for dark theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #222C3B #0B0F14;
+}
+
+/* Text selection */
+::selection {
+  background-color: rgba(63, 182, 139, 0.3);
+  color: #E6EDF3;
+}
+
+/* Focus ring for accessibility */
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid #3FB68B;
+  outline-offset: 2px;
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, #1A2230 25%, #222C3B 50%, #1A2230 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Tooltip styles */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: #1A2230;
+  border: 1px solid #222C3B;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
