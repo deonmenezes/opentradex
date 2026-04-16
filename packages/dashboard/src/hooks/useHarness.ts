@@ -9,6 +9,7 @@ import type {
 } from '../lib/types';
 
 const API_BASE = '/api';
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
 // Mock data for demo
 const mockStatus: HarnessStatus = {
@@ -90,71 +91,165 @@ export function useHarness() {
   const [markets, setMarkets] = useState<Market[]>(mockMarkets);
   const [feed, setFeed] = useState<FeedItem[]>(mockFeed);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [connectionType, setConnectionType] = useState<'ws' | 'sse' | 'none'>('none');
+  const wsRef = useRef<WebSocket | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch initial data
+  // Handle real-time message
+  const handleRealtimeMessage = useCallback((data: { type: string; payload: unknown }) => {
+    if (data.type === 'position') {
+      setPositions((prev) => {
+        const payload = data.payload as Position;
+        const idx = prev.findIndex((p) => p.id === payload.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = payload;
+          return updated;
+        }
+        return [payload, ...prev];
+      });
+    } else if (data.type === 'trade') {
+      setTrades((prev) => [data.payload as Trade, ...prev.slice(0, 19)]);
+    } else if (data.type === 'feed') {
+      setFeed((prev) => [data.payload as FeedItem, ...prev.slice(0, 49)]);
+    } else if (data.type === 'market') {
+      setMarkets((prev) => {
+        const payload = data.payload as Market;
+        const idx = prev.findIndex((m) => m.id === payload.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = payload;
+          return updated;
+        }
+        return [payload, ...prev];
+      });
+    }
+  }, []);
+
+  // Setup WebSocket connection with SSE fallback
   useEffect(() => {
+    let mounted = true;
+
     async function fetchData() {
       try {
-        // Try to connect to real API
         const res = await fetch(`${API_BASE}/`);
         if (res.ok) {
           const data = await res.json();
-          setStatus((prev) => ({
-            ...prev,
-            connection: 'connected',
-            rails: {
-              kalshi: data.exchanges?.includes('kalshi') ?? true,
-              polymarket: data.exchanges?.includes('polymarket') ?? true,
-              alpaca: data.exchanges?.includes('alpaca') ?? false,
-              tradingview: data.exchanges?.includes('tradingview') ?? true,
-              crypto: data.exchanges?.includes('crypto') ?? true,
-            },
-          }));
+          if (mounted) {
+            setStatus((prev) => ({
+              ...prev,
+              connection: 'connected',
+              rails: {
+                kalshi: data.exchanges?.includes('kalshi') ?? true,
+                polymarket: data.exchanges?.includes('polymarket') ?? true,
+                alpaca: data.exchanges?.includes('alpaca') ?? false,
+                tradingview: data.exchanges?.includes('tradingview') ?? true,
+                crypto: data.exchanges?.includes('crypto') ?? true,
+              },
+            }));
+          }
         }
       } catch {
-        // Use mock data if API unavailable
-        setStatus((prev) => ({ ...prev, connection: 'disconnected' }));
+        if (mounted) {
+          setStatus((prev) => ({ ...prev, connection: 'disconnected' }));
+        }
+      }
+    }
+
+    function connectWebSocket() {
+      if (!mounted) return;
+
+      try {
+        const ws = new WebSocket(WS_URL);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          if (mounted) {
+            console.log('[WS] Connected');
+            setConnectionType('ws');
+            setStatus((prev) => ({ ...prev, connection: 'connected' }));
+          }
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleRealtimeMessage(data);
+          } catch {
+            // Ignore invalid JSON
+          }
+        };
+
+        ws.onerror = () => {
+          console.log('[WS] Error, falling back to SSE');
+          ws.close();
+        };
+
+        ws.onclose = () => {
+          if (mounted) {
+            wsRef.current = null;
+            // Fall back to SSE
+            connectSSE();
+            // Try to reconnect WebSocket after delay
+            reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
+          }
+        };
+      } catch {
+        // WebSocket not available, use SSE
+        connectSSE();
+      }
+    }
+
+    function connectSSE() {
+      if (!mounted || eventSourceRef.current) return;
+
+      try {
+        const es = new EventSource(`${API_BASE}/events`);
+        eventSourceRef.current = es;
+
+        es.onopen = () => {
+          if (mounted && connectionType !== 'ws') {
+            console.log('[SSE] Connected');
+            setConnectionType('sse');
+            setStatus((prev) => ({ ...prev, connection: 'connected' }));
+          }
+        };
+
+        es.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleRealtimeMessage(data);
+          } catch {
+            // Ignore invalid JSON
+          }
+        };
+
+        es.onerror = () => {
+          if (mounted) {
+            setStatus((prev) => ({ ...prev, connection: 'reconnecting' }));
+          }
+        };
+      } catch {
+        // SSE not available
+        if (mounted) {
+          setConnectionType('none');
+        }
       }
     }
 
     fetchData();
-
-    // Set up SSE for real-time updates
-    try {
-      const es = new EventSource(`${API_BASE}/events`);
-      eventSourceRef.current = es;
-
-      es.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'position') {
-          setPositions((prev) => {
-            const idx = prev.findIndex((p) => p.id === data.payload.id);
-            if (idx >= 0) {
-              const updated = [...prev];
-              updated[idx] = data.payload;
-              return updated;
-            }
-            return [data.payload, ...prev];
-          });
-        } else if (data.type === 'trade') {
-          setTrades((prev) => [data.payload, ...prev.slice(0, 19)]);
-        } else if (data.type === 'feed') {
-          setFeed((prev) => [data.payload, ...prev.slice(0, 49)]);
-        }
-      };
-
-      es.onerror = () => {
-        setStatus((prev) => ({ ...prev, connection: 'disconnected' }));
-      };
-    } catch {
-      // SSE not available
-    }
+    connectWebSocket();
 
     return () => {
+      mounted = false;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      wsRef.current?.close();
       eventSourceRef.current?.close();
     };
-  }, []);
+  }, [handleRealtimeMessage, connectionType]);
 
   // Send command to harness
   const sendCommand = useCallback(async (command: string): Promise<string> => {

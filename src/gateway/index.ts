@@ -1,9 +1,10 @@
-/** OpenTradex Gateway - IP-enabled HTTP server with auth, SSE, and Dashboard UI */
+/** OpenTradex Gateway - IP-enabled HTTP server with auth, SSE, WebSocket, and Dashboard UI */
 
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { OpenTradex } from '../index.js';
 import { loadConfig, verifyAuthToken, getModeBadge, readModeLock } from '../config.js';
 import { getRiskState, panicFlatten, isTradingHalted, checkRisk } from '../risk.js';
@@ -21,11 +22,97 @@ export interface GatewayConfig {
 // SSE clients for real-time updates
 const sseClients = new Set<ServerResponse>();
 
-// Broadcast event to all SSE clients
+// WebSocket clients for real-time updates (native implementation)
+interface WebSocketClient {
+  socket: import('node:net').Socket;
+  isAlive: boolean;
+  id: string;
+}
+const wsClients = new Set<WebSocketClient>();
+
+// WebSocket frame encoding (RFC 6455)
+function encodeWebSocketFrame(data: string): Buffer {
+  const payload = Buffer.from(data, 'utf8');
+  const length = payload.length;
+
+  let header: Buffer;
+  if (length <= 125) {
+    header = Buffer.alloc(2);
+    header[0] = 0x81; // FIN + text frame
+    header[1] = length;
+  } else if (length <= 65535) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(length), 2);
+  }
+
+  return Buffer.concat([header, payload]);
+}
+
+// Decode WebSocket frame
+function decodeWebSocketFrame(buffer: Buffer): { opcode: number; payload: string } | null {
+  if (buffer.length < 2) return null;
+
+  const firstByte = buffer[0];
+  const secondByte = buffer[1];
+  const opcode = firstByte & 0x0f;
+  const isMasked = (secondByte & 0x80) !== 0;
+  let payloadLength = secondByte & 0x7f;
+  let offset = 2;
+
+  if (payloadLength === 126) {
+    if (buffer.length < 4) return null;
+    payloadLength = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (payloadLength === 127) {
+    if (buffer.length < 10) return null;
+    payloadLength = Number(buffer.readBigUInt64BE(2));
+    offset = 10;
+  }
+
+  let maskKey: Buffer | null = null;
+  if (isMasked) {
+    if (buffer.length < offset + 4) return null;
+    maskKey = buffer.subarray(offset, offset + 4);
+    offset += 4;
+  }
+
+  if (buffer.length < offset + payloadLength) return null;
+
+  let payload = buffer.subarray(offset, offset + payloadLength);
+  if (maskKey) {
+    payload = Buffer.from(payload);
+    for (let i = 0; i < payload.length; i++) {
+      payload[i] ^= maskKey[i % 4];
+    }
+  }
+
+  return { opcode, payload: payload.toString('utf8') };
+}
+
+// Broadcast event to all SSE and WebSocket clients
 export function broadcast(type: string, payload: unknown): void {
   const data = JSON.stringify({ type, payload, timestamp: Date.now() });
+
+  // Broadcast to SSE clients
   for (const client of sseClients) {
     client.write(`data: ${data}\n\n`);
+  }
+
+  // Broadcast to WebSocket clients
+  const frame = encodeWebSocketFrame(data);
+  for (const client of wsClients) {
+    try {
+      client.socket.write(frame);
+    } catch {
+      wsClients.delete(client);
+    }
   }
 }
 
@@ -423,6 +510,141 @@ POST /api/panic       Emergency stop
     }
   });
 
+  // WebSocket upgrade handler (native, no external dependencies)
+  server.on('upgrade', (req: IncomingMessage, socket: import('node:net').Socket, head: Buffer) => {
+    const url = new URL(req.url || '/', `http://${host}`);
+
+    // Only handle /ws endpoint
+    if (url.pathname !== '/ws' && url.pathname !== '/api/ws') {
+      socket.destroy();
+      return;
+    }
+
+    // Check auth for WebSocket
+    const tokenParam = url.searchParams.get('token');
+    if (requireAuth && !tokenParam) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    if (requireAuth && tokenParam && !verifyAuthToken(tokenParam)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    // Perform WebSocket handshake
+    const key = req.headers['sec-websocket-key'];
+    if (!key) {
+      socket.destroy();
+      return;
+    }
+
+    const acceptKey = createHash('sha1')
+      .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64');
+
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${acceptKey}\r\n` +
+      '\r\n'
+    );
+
+    const clientId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+    const client: WebSocketClient = { socket, isAlive: true, id: clientId };
+    wsClients.add(client);
+
+    console.log(`[WS] Client connected: ${clientId} (${wsClients.size} total)`);
+
+    // Send welcome message
+    const welcomeMsg = encodeWebSocketFrame(JSON.stringify({
+      type: 'connected',
+      payload: { clientId, protocol: 'websocket' },
+      timestamp: Date.now(),
+    }));
+    socket.write(welcomeMsg);
+
+    // Handle incoming messages
+    let buffer = Buffer.alloc(0);
+    socket.on('data', (data: Buffer) => {
+      buffer = Buffer.concat([buffer, data]);
+
+      const frame = decodeWebSocketFrame(buffer);
+      if (!frame) return;
+
+      buffer = Buffer.alloc(0); // Clear buffer after processing
+
+      // Handle different opcodes
+      if (frame.opcode === 0x08) {
+        // Close frame
+        wsClients.delete(client);
+        socket.end();
+        return;
+      }
+
+      if (frame.opcode === 0x09) {
+        // Ping - respond with pong
+        const pong = Buffer.alloc(2);
+        pong[0] = 0x8a; // Pong frame
+        pong[1] = 0x00;
+        socket.write(pong);
+        return;
+      }
+
+      if (frame.opcode === 0x0a) {
+        // Pong - mark client as alive
+        client.isAlive = true;
+        return;
+      }
+
+      // Text frame - handle message
+      if (frame.opcode === 0x01) {
+        try {
+          const msg = JSON.parse(frame.payload);
+          if (msg.type === 'ping') {
+            const response = encodeWebSocketFrame(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+            socket.write(response);
+          }
+        } catch {
+          // Ignore invalid JSON
+        }
+      }
+    });
+
+    socket.on('close', () => {
+      wsClients.delete(client);
+      console.log(`[WS] Client disconnected: ${clientId} (${wsClients.size} remaining)`);
+    });
+
+    socket.on('error', () => {
+      wsClients.delete(client);
+    });
+  });
+
+  // WebSocket heartbeat to detect dead connections
+  const wsHeartbeat = setInterval(() => {
+    for (const client of wsClients) {
+      if (!client.isAlive) {
+        wsClients.delete(client);
+        client.socket.destroy();
+        continue;
+      }
+      client.isAlive = false;
+      // Send ping
+      const ping = Buffer.alloc(2);
+      ping[0] = 0x89; // Ping frame
+      ping[1] = 0x00;
+      try {
+        client.socket.write(ping);
+      } catch {
+        wsClients.delete(client);
+      }
+    }
+  }, 30000);
+
   return {
     start() {
       return new Promise<void>((resolve) => {
@@ -438,10 +660,12 @@ POST /api/panic       Emergency stop
 ║                                                              ║
 ║   Dashboard: http://${isRemote ? '0.0.0.0' : 'localhost'}:${String(port).padEnd(5)}                          ║
 ║   API:       http://${isRemote ? '0.0.0.0' : 'localhost'}:${String(port).padEnd(5)}/api                      ║
+║   WebSocket: ws://${isRemote ? '0.0.0.0' : 'localhost'}:${String(port).padEnd(5)}/ws                        ║
 ║                                                              ║
 ║   Mode:      ${badge.text.padEnd(12)}                                   ║
 ║   UI:        ${hasDashboard ? 'Enabled ✓' : 'Not built (run npm run build:all)'}              ║
 ║   Auth:      ${requireAuth ? 'Required (bearer token)' : 'Disabled (local only)'}              ║
+║   Realtime:  SSE + WebSocket ✓                               ║
 ║                                                              ║
 ║   Exchanges: ${harness.exchanges.join(', ').padEnd(40)}  ║
 ║                                                              ║
@@ -463,10 +687,29 @@ POST /api/panic       Emergency stop
       });
     },
     stop() {
+      // Clear heartbeat
+      clearInterval(wsHeartbeat);
+
+      // Close SSE clients
       for (const client of sseClients) {
         client.end();
       }
       sseClients.clear();
+
+      // Close WebSocket clients
+      for (const client of wsClients) {
+        try {
+          // Send close frame
+          const closeFrame = Buffer.alloc(2);
+          closeFrame[0] = 0x88; // Close frame
+          closeFrame[1] = 0x00;
+          client.socket.write(closeFrame);
+          client.socket.end();
+        } catch {
+          // Ignore errors during shutdown
+        }
+      }
+      wsClients.clear();
 
       return new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
@@ -474,5 +717,6 @@ POST /api/panic       Emergency stop
     },
     server,
     broadcast,
+    wsClients, // Expose for testing
   };
 }
