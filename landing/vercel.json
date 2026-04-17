@@ -1,14 +1,12 @@
 {
-  "redirects": [
+  "rewrites": [
     {
       "source": "/download",
-      "destination": "https://github.com/deonmenezes/opentradex/releases/latest/download/OpenTradex.Setup.0.1.0.exe",
-      "permanent": false
+      "destination": "https://github.com/deonmenezes/opentradex/releases/latest/download/OpenTradex.Setup.0.1.0.exe"
     },
     {
       "source": "/download/windows",
-      "destination": "https://github.com/deonmenezes/opentradex/releases/latest/download/OpenTradex.Setup.0.1.0.exe",
-      "permanent": false
+      "destination": "https://github.com/deonmenezes/opentradex/releases/latest/download/OpenTradex.Setup.0.1.0.exe"
     }
   ],
   "cleanUrls": true,
