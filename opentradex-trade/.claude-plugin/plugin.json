@@ -1,0 +1,23 @@
+{
+  "name": "opentradex-trade",
+  "description": "Paper-trade across Kalshi, Polymarket, Alpaca, and Coinbase from a Claude Code session. Onboarding collects API keys; a tiny Node helper handles scan/order/ledger for all rails. v1 is paper-only.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Deon Menezes",
+    "email": "deonmenezescodes@gmail.com"
+  },
+  "homepage": "https://github.com/deonmenezes/opentradex",
+  "repository": "https://github.com/deonmenezes/opentradex",
+  "license": "MIT",
+  "keywords": [
+    "trading",
+    "kalshi",
+    "polymarket",
+    "alpaca",
+    "coinbase",
+    "crypto",
+    "prediction-markets",
+    "paper-trading",
+    "claude-code-plugin"
+  ]
+}
