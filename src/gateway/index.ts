@@ -10,6 +10,7 @@ import { loadConfig, verifyAuthToken, getModeBadge, readModeLock } from '../conf
 import { getRiskState, panicFlatten, isTradingHalted, checkRisk } from '../risk.js';
 import { getAgent, AgentConfig } from '../agent/index.js';
 import { getAI, initializeAI } from '../ai/index.js';
+import { addressFromKey, generatePrivateKey, isPaymentsActive, loadX402Settings, readLedger, saveX402Settings } from '../x402/index.js';
 import type { Exchange } from '../types.js';
 
 // Get the directory of this file to find the dashboard
@@ -251,8 +252,8 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
     }
 
     // Auth check for API routes (skip for static files and health)
-    const protectedPrefixes = ['/api/', '/agent/', '/ai/'];
-    const protectedExact = ['/scan', '/search', '/quote', '/orderbook', '/risk', '/risk/check', '/command', '/panic', '/config', '/events', '/agent', '/ai'];
+    const protectedPrefixes = ['/api/', '/agent/', '/ai/', '/x402/'];
+    const protectedExact = ['/scan', '/search', '/quote', '/orderbook', '/risk', '/risk/check', '/command', '/panic', '/config', '/events', '/agent', '/ai', '/x402'];
     const isApiRoute = protectedPrefixes.some((p) => path.startsWith(p)) || protectedExact.includes(path);
     if (isApiRoute && path !== '/api/health' && !checkAuth(req, requireAuth)) {
       return error(res, 'Unauthorized', 401);
@@ -463,6 +464,57 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
             }
           : null;
         return json(res, safeConfig);
+      }
+
+      // ============ x402 PAYMENTS ROUTES ============
+
+      // Wallet + protocol status (safe — never exposes private key)
+      if (path === '/x402/status' || path === '/api/x402/status') {
+        const settings = loadX402Settings();
+        const active = await isPaymentsActive();
+        let address: string | null = null;
+        if (settings.enabled && settings.privateKey) {
+          try { address = await addressFromKey(settings.privateKey); } catch { address = null; }
+        }
+        return json(res, {
+          enabled: settings.enabled,
+          active,
+          chain: settings.chain,
+          maxPaymentUsd: settings.maxPaymentUsd,
+          address,
+          facilitatorUrl: settings.facilitatorUrl ?? null,
+        });
+      }
+
+      // Enable / update x402 (accepts { chain, maxPaymentUsd, privateKey?, generate? })
+      if ((path === '/x402/enable' || path === '/api/x402/enable') && req.method === 'POST') {
+        const body = await readBody(req);
+        const input = body ? JSON.parse(body) : {};
+        let privateKey: `0x${string}` | undefined = input.privateKey;
+        if (!privateKey && input.generate) privateKey = await generatePrivateKey();
+        if (!privateKey) return error(res, 'Provide privateKey or set generate:true', 400);
+        if (!privateKey.startsWith('0x') || privateKey.length !== 66) return error(res, 'Invalid private key', 400);
+        const saved = saveX402Settings({
+          chain: input.chain ?? 'base-sepolia',
+          maxPaymentUsd: Number(input.maxPaymentUsd ?? 1),
+          privateKey,
+        });
+        const address = await addressFromKey(privateKey);
+        broadcast('x402', { event: 'enabled', address, chain: saved.chain });
+        return json(res, { enabled: true, chain: saved.chain, maxPaymentUsd: saved.maxPaymentUsd, address });
+      }
+
+      // Disable x402 (clears the key)
+      if ((path === '/x402/disable' || path === '/api/x402/disable') && req.method === 'POST') {
+        saveX402Settings({ privateKey: null });
+        broadcast('x402', { event: 'disabled' });
+        return json(res, { enabled: false });
+      }
+
+      // Recent payments ledger
+      if (path === '/x402/ledger' || path === '/api/x402/ledger') {
+        const limit = parseInt(params.get('limit') || '100');
+        return json(res, { entries: readLedger(Math.min(limit, 500)) });
       }
 
       // ============ AI AGENT ROUTES ============

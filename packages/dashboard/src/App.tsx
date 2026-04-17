@@ -6,10 +6,11 @@ import RightSidebar from './components/RightSidebar';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/Resizable';
 import TradesPage from './pages/TradesPage';
 import MarketsPage from './pages/MarketsPage';
+import PaymentsPage from './pages/PaymentsPage';
 import { useHarness } from './hooks/useHarness';
 import type { Position, Market, FeedItem, Connector } from './lib/types';
 
-type View = 'cockpit' | 'trades' | 'markets';
+type View = 'cockpit' | 'trades' | 'markets' | 'payments';
 
 export default function App() {
   const { status, positions, trades, markets, feed, sendCommand, runCycle, toggleAutoLoop, setLoopInterval } = useHarness();
@@ -18,13 +19,13 @@ export default function App() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [view, setView] = useState<View>(() => {
     const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
-    return hash === 'trades' || hash === 'markets' ? (hash as View) : 'cockpit';
+    return hash === 'trades' || hash === 'markets' || hash === 'payments' ? (hash as View) : 'cockpit';
   });
 
   useEffect(() => {
     const onHash = () => {
       const h = window.location.hash.replace('#', '');
-      if (h === 'trades' || h === 'markets' || h === 'cockpit' || h === '') {
+      if (h === 'trades' || h === 'markets' || h === 'payments' || h === 'cockpit' || h === '') {
         setView((h as View) || 'cockpit');
       }
     };
@@ -89,10 +90,15 @@ export default function App() {
         onToggleRightSidebar={toggleRightSidebar}
         onShowTrades={() => setView('trades')}
         onShowMarkets={() => setView('markets')}
+        onShowPayments={() => setView('payments')}
       />
 
       {view === 'trades' && (
         <TradesPage trades={trades} onBack={() => setView('cockpit')} />
+      )}
+
+      {view === 'payments' && (
+        <PaymentsPage onBack={() => setView('cockpit')} />
       )}
 
       {view === 'markets' && (

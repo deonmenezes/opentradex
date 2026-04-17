@@ -1,7 +1,9 @@
 /** Base HTTP utilities for market connectors */
 
+import { paidFetch } from '../x402/client.js';
+
 export async function httpGet<T>(url: string, headers?: Record<string, string>): Promise<T> {
-  const res = await fetch(url, {
+  const res = await paidFetch(url, {
     headers: { 'Accept': 'application/json', ...headers },
   });
   if (!res.ok) {
@@ -15,7 +17,7 @@ export async function httpPost<T>(
   body: unknown,
   headers?: Record<string, string>
 ): Promise<T> {
-  const res = await fetch(url, {
+  const res = await paidFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...headers },
     body: JSON.stringify(body),

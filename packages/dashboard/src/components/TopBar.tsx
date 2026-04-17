@@ -10,6 +10,7 @@ interface TopBarProps {
   onToggleRightSidebar?: () => void;
   onShowTrades?: () => void;
   onShowMarkets?: () => void;
+  onShowPayments?: () => void;
 }
 
 // Memoized TopBar to prevent unnecessary re-renders
@@ -21,7 +22,8 @@ export default memo(function TopBar({
   onToggleLeftSidebar,
   onToggleRightSidebar,
   onShowTrades,
-  onShowMarkets
+  onShowMarkets,
+  onShowPayments
 }: TopBarProps) {
   const [loopMenuOpen, setLoopMenuOpen] = useState(false);
   const loopIntervals = [1, 2, 5, 10, 15, 30];
@@ -143,6 +145,15 @@ export default memo(function TopBar({
           >
             <span className="text-accent font-medium">live</span>
             <span>markets</span>
+          </button>
+          <button
+            onClick={onShowPayments}
+            className="flex items-baseline gap-1 text-text-dim hover:text-text transition-colors"
+            aria-label="Agentic payments (x402)"
+            title="x402 Agentic Payments"
+          >
+            <span className="text-accent font-medium">x402</span>
+            <span>pay</span>
           </button>
           <div className="flex items-baseline gap-1 text-text-dim">
             <span className={`font-medium tabular-nums ${status.winRate >= 50 ? 'text-accent' : 'text-warning'}`}>{status.winRate}%</span>

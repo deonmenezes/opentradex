@@ -307,8 +307,20 @@ export async function runOnboard(paperOnly = false): Promise<void> {
     }
   }
 
-  // Step 7: Claude Code MCP Integration
-  header('Step 7: Claude Code Integration (Optional)');
+  // Step 7: x402 Agentic Payments
+  header('Step 7: x402 Agentic Payments (Optional)');
+
+  print('Let the AI agent auto-pay 402-gated APIs with USDC micropayments.');
+  print('Useful for premium data providers, paid news APIs, and MCP tools.\n');
+  print('Safe defaults:');
+  print('  - Base Sepolia testnet (free test USDC via CDP faucet)');
+  print('  - Max $1 per call');
+  print('  - Key stored at ~/.opentradex/config.json (chmod 600)\n');
+
+  await runX402Onboard();
+
+  // Step 8: Claude Code MCP Integration
+  header('Step 8: Claude Code Integration (Optional)');
 
   print('Connect OpenTradex as an MCP server for Claude Code CLI.\n');
   print('This allows Claude Code to:');
@@ -397,6 +409,75 @@ export async function runOnboard(paperOnly = false): Promise<void> {
   print('  opentradex panic    Emergency stop all trading');
 
   rl.close();
+}
+
+/**
+ * Interactive x402 setup — prompts for chain, max payment, and key source.
+ * Can be re-run independently via `opentradex x402 setup`.
+ */
+export async function runX402Onboard(): Promise<void> {
+  const { loadX402Settings, saveX402Settings, generatePrivateKey, addressFromKey } =
+    await import('./x402/index.js');
+
+  const existing = loadX402Settings();
+  if (existing.enabled) {
+    print(`x402 already enabled on ${existing.chain} (max $${existing.maxPaymentUsd} per call).`);
+    const reconfigure = await askYesNo('Reconfigure?', false);
+    if (!reconfigure) return;
+  }
+
+  const enable = await askYesNo('Enable x402 payments now?', false);
+  if (!enable) {
+    print('Skipped. You can enable later with: opentradex x402 setup\n');
+    return;
+  }
+
+  const chain = await selectOption<'base-sepolia' | 'base'>(
+    'Which chain?',
+    [
+      { value: 'base-sepolia', label: 'Base Sepolia (testnet, free USDC)' },
+      { value: 'base', label: 'Base mainnet (real USDC)' },
+    ],
+    'base-sepolia'
+  );
+
+  const maxPaymentUsd = await askNumber('Max payment per call (USD)', 1);
+
+  const source = await selectOption<'generate' | 'paste'>(
+    'Wallet key:',
+    [
+      { value: 'generate', label: 'Generate a new wallet now (recommended for testnet)' },
+      { value: 'paste', label: 'Paste an existing 0x private key' },
+    ],
+    'generate'
+  );
+
+  let privateKey: `0x${string}`;
+  if (source === 'generate') {
+    privateKey = await generatePrivateKey();
+    print('\nGenerated fresh key. Public address will be shown below.');
+  } else {
+    const raw = await ask('Private key (0x...): ');
+    if (!raw.startsWith('0x') || raw.length !== 66) {
+      print('\nInvalid key. Skipping — run `opentradex x402 setup` to retry.\n');
+      return;
+    }
+    privateKey = raw as `0x${string}`;
+  }
+
+  const saved = saveX402Settings({ chain, maxPaymentUsd, privateKey });
+  const address = await addressFromKey(privateKey);
+
+  print('\nx402 configured:');
+  print(`  Chain:    ${saved.chain}`);
+  print(`  Max/call: $${saved.maxPaymentUsd}`);
+  print(`  Address:  ${address}`);
+  if (chain === 'base-sepolia') {
+    print('\nFund this address with test USDC: https://faucet.circle.com');
+  } else {
+    print('\nFund this address with USDC on Base mainnet before making paid calls.');
+  }
+  print('');
 }
 
 export async function showStatus(): Promise<void> {

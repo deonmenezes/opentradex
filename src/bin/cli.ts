@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OpenTradex } from '../index.js';
 import { createGateway } from '../gateway/index.js';
-import { runOnboard, showStatus } from '../onboard.js';
+import { runOnboard, runX402Onboard, showStatus } from '../onboard.js';
 import {
   isOnboarded,
   loadConfig,
@@ -305,6 +305,53 @@ async function main(): Promise<void> {
       break;
     }
 
+    // ============ x402 PAYMENTS ============
+    case 'x402': {
+      const subCmd = args[0];
+      const { loadX402Settings, saveX402Settings, addressFromKey, readLedger } =
+        await import('../x402/index.js');
+
+      if (!subCmd || subCmd === 'setup') {
+        await runX402Onboard();
+      } else if (subCmd === 'status') {
+        const s = loadX402Settings();
+        print(`x402 Payments: ${s.enabled ? '\x1b[32mENABLED\x1b[0m' : '\x1b[33mdisabled\x1b[0m'}`);
+        print(`  Chain:         ${s.chain}`);
+        print(`  Max per call:  $${s.maxPaymentUsd}`);
+        if (s.enabled && s.privateKey) {
+          const address = await addressFromKey(s.privateKey);
+          print(`  Address:       ${address}`);
+          if (s.chain === 'base-sepolia') {
+            print(`  Faucet:        https://faucet.circle.com`);
+          }
+        }
+      } else if (subCmd === 'ledger') {
+        const limit = parseInt(args[1] || '20');
+        const entries = readLedger(limit);
+        if (entries.length === 0) {
+          print('No x402 payments recorded yet.');
+        } else {
+          print(`Last ${entries.length} payments:`);
+          for (const e of entries) {
+            const amt = `$${e.amountUsd.toFixed(4)}`.padStart(9);
+            const tx = e.txHash ? e.txHash.slice(0, 12) + '…' : 'pending';
+            print(`  ${e.timestamp.slice(11, 19)} ${e.direction.padEnd(3)} ${amt} ${tx}  ${e.url.slice(0, 48)}`);
+          }
+        }
+      } else if (subCmd === 'disable') {
+        saveX402Settings({ privateKey: null });
+        printSuccess('x402 disabled. Outbound calls fall back to plain fetch.');
+      } else {
+        print('Usage: opentradex x402 <setup|status|ledger|disable>');
+        print('');
+        print('  setup         Interactive wizard (chain, max, key)');
+        print('  status        Show current x402 configuration');
+        print('  ledger [n]    Show last N payments (default 20)');
+        print('  disable       Clear the private key and turn payments off');
+      }
+      break;
+    }
+
     // ============ VERSION ============
     case 'version':
     case '-v':
@@ -339,6 +386,12 @@ async function main(): Promise<void> {
   opentradex ai status                Check AI availability
   opentradex ai init <api-key>        Initialize with Anthropic API key
   opentradex ai chat <message>        Send a message to the AI
+
+\x1b[1mx402 PAYMENTS\x1b[0m
+  opentradex x402 setup               Configure agentic USDC payments
+  opentradex x402 status              Show wallet address + chain
+  opentradex x402 ledger [n]          Show last N payments
+  opentradex x402 disable             Turn payments off
 
 \x1b[1mINTEGRATIONS\x1b[0m
   opentradex mcp                      Start MCP server for Claude Code

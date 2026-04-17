@@ -10,6 +10,46 @@ import type {
 
 const API_BASE = '/api';
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+const POLL_INTERVAL_MS = 5000;
+
+function formatVolume(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return '0';
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toFixed(0);
+}
+
+interface GatewayMarket {
+  id: string;
+  exchange: string;
+  symbol: string;
+  title: string;
+  price?: number;
+  mid?: number;
+  bid?: number;
+  ask?: number;
+  bidAsk?: string;
+  volume?: number | string;
+}
+
+function toMarket(m: GatewayMarket): Market {
+  const mid = typeof m.mid === 'number' ? m.mid : typeof m.price === 'number' ? Math.round(m.price * 100) : 0;
+  const bidAsk =
+    m.bidAsk ??
+    (typeof m.bid === 'number' && typeof m.ask === 'number'
+      ? `${Math.round(m.bid * 100)}/${Math.round(m.ask * 100)}`
+      : `${Math.max(0, mid - 1)}/${mid + 1}`);
+  return {
+    id: String(m.id),
+    exchange: m.exchange,
+    symbol: m.symbol,
+    title: m.title,
+    bidAsk,
+    mid,
+    volume: typeof m.volume === 'number' ? formatVolume(m.volume) : (m.volume ?? '0'),
+  };
+}
 
 // Mock data for demo
 const mockStatus: HarnessStatus = {
@@ -138,6 +178,7 @@ export function useHarness() {
   // Setup WebSocket connection with SSE fallback
   useEffect(() => {
     let mounted = true;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
 
     async function fetchData() {
       try {
@@ -147,6 +188,7 @@ export function useHarness() {
           if (mounted) {
             setStatus((prev) => ({
               ...prev,
+              mode: data.mode || prev.mode,
               connection: 'connected',
               rails: {
                 kalshi: data.exchanges?.includes('kalshi') ?? true,
@@ -162,6 +204,55 @@ export function useHarness() {
         if (mounted) {
           setStatus((prev) => ({ ...prev, connection: 'disconnected' }));
         }
+      }
+    }
+
+    // Pull live data from the gateway (real markets, real risk state)
+    async function pollLive() {
+      if (!mounted) return;
+      try {
+        const [scanRes, riskRes] = await Promise.all([
+          fetch(`${API_BASE}/scan?limit=50`).catch(() => null),
+          fetch(`${API_BASE}/risk`).catch(() => null),
+        ]);
+
+        if (scanRes?.ok && mounted) {
+          const data = await scanRes.json();
+          const live = Array.isArray(data?.markets) ? (data.markets as GatewayMarket[]).map(toMarket) : [];
+          if (live.length > 0) setMarkets(live);
+        }
+
+        if (riskRes?.ok && mounted) {
+          const data = await riskRes.json();
+          const state = data?.state;
+          if (state) {
+            const livePositions = Array.isArray(state.openPositions)
+              ? (state.openPositions as Array<Record<string, unknown>>).map((p, i): Position => ({
+                  id: String(p.id ?? i),
+                  exchange: String(p.exchange ?? 'kalshi'),
+                  symbol: String(p.symbol ?? '—'),
+                  title: String(p.title ?? p.symbol ?? ''),
+                  side: (p.side as Position['side']) ?? 'yes',
+                  size: Number(p.size ?? 0),
+                  avgPrice: Number(p.avgPrice ?? p.entry ?? 0),
+                  currentPrice: Number(p.currentPrice ?? p.mark ?? p.avgPrice ?? 0),
+                  pnl: Number(p.pnl ?? 0),
+                  pnlPercent: Number(p.pnlPercent ?? 0),
+                  confidence: (p.confidence as Position['confidence']) ?? 'Medium',
+                }))
+              : [];
+            setPositions(livePositions);
+            setStatus((prev) => ({
+              ...prev,
+              dayPnL: Number(state.dailyPnL ?? 0),
+              dayPnLPercent: prev.capital > 0 ? (Number(state.dailyPnL ?? 0) / prev.capital) * 100 : 0,
+              trades: Number(state.dailyTrades ?? 0),
+              openPositions: livePositions.length,
+            }));
+          }
+        }
+      } catch {
+        /* swallow — next tick will retry */
       }
     }
 
@@ -253,12 +344,15 @@ export function useHarness() {
 
     fetchData();
     connectWebSocket();
+    pollLive();
+    pollTimer = setInterval(pollLive, POLL_INTERVAL_MS);
 
     return () => {
       mounted = false;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      if (pollTimer) clearInterval(pollTimer);
       wsRef.current?.close();
       eventSourceRef.current?.close();
     };
