@@ -109,7 +109,7 @@ export default memo(function RightSidebar({ feed, onClose, onFeedAction }: Right
         </button>
 
         <button
-          onClick={() => window.open('https://discord.gg/opentradex', '_blank')}
+          onClick={() => window.open('https://discord.gg/tNfdVQU5', '_blank')}
           className="w-full text-left p-3 rounded-lg bg-surface-2 hover:bg-card-hover cursor-pointer transition-colors"
         >
           <div className="flex items-center justify-between mb-1">

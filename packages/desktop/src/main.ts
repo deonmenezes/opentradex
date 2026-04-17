@@ -236,7 +236,7 @@ function createMenu(): void {
         {
           label: 'Join Discord',
           click: () => {
-            shell.openExternal('https://discord.gg/opentradex');
+            shell.openExternal('https://discord.gg/tNfdVQU5');
           },
         },
       ],

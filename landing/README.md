@@ -35,7 +35,7 @@ All external URLs live in `index.html`. Search and replace:
 
 | Placeholder | Update to |
 |---|---|
-| `https://discord.gg/opentradex` | your real Discord invite |
+| `https://discord.gg/tNfdVQU5` | Discord invite (update if rotated) |
 | `https://github.com/deonmenezes/opentradex/releases` | releases URL once the first `.exe` is published |
 
 ## Design tokens
