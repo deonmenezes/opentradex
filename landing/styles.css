@@ -222,6 +222,8 @@ pre  { font-family: var(--mono); background: var(--surface); border: 1px solid v
 .install-card p { margin: 0; }
 .install-card pre { margin: 0; }
 .install-card .btn-primary, .install-card .btn-ghost { align-self: flex-start; margin-top: auto; }
+.install-sub { font-size: 0.85rem; color: var(--text-dim); text-decoration: none; margin-top: -4px; }
+.install-sub:hover { color: var(--accent); }
 
 /* community */
 .community { padding: 80px 0; border-top: 1px solid var(--border); }
