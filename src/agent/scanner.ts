@@ -244,9 +244,13 @@ export class MarketScanner extends EventEmitter {
   // Public API
 
   setWatchlist(symbols: string[]): void {
-    this.watchlist = symbols;
-    // Also sync to scraper service
-    getScraperService().setWatchlist(symbols);
+    if (symbols.length) {
+      this.watchlist = symbols.map((s) => s.toUpperCase());
+      getScraperService().setWatchlist(this.watchlist);
+    } else {
+      // Empty array → restore default watchlist from scraper
+      this.watchlist = getScraperService().getWatchlist();
+    }
   }
 
   addToWatchlist(symbol: string): void {
