@@ -1,8 +1,13 @@
 /**
- * Market Scanner - Monitors multiple exchanges for trading opportunities
+ * Market Scanner - Monitors multiple exchanges for trading opportunities.
+ *
+ * Now powered by the ScraperService for LIVE market data instead of hardcoded prices.
+ * Falls back to mock data only when the scraper hasn't fetched yet.
  */
 
 import { EventEmitter } from 'events';
+import { getScraperService } from '../scraper/service.js';
+import type { ScrapedPrice } from '../scraper/types.js';
 
 export interface ScanResult {
   id: string;
@@ -39,6 +44,7 @@ export class MarketScanner extends EventEmitter {
   private watchlist: string[] = [];
   private exchanges: string[] = ['stocks', 'crypto', 'commodities'];
   private lastPrices: Map<string, number> = new Map();
+  private priceHistory: Map<string, number[]> = new Map();
 
   constructor() {
     super();
@@ -46,11 +52,9 @@ export class MarketScanner extends EventEmitter {
   }
 
   private loadDefaultWatchlist(): void {
-    this.watchlist = [
-      'SPY', 'QQQ', 'AAPL', 'NVDA', 'MSFT', 'GOOGL', 'AMZN', 'TSLA',
-      'BTC', 'ETH', 'SOL',
-      'GOLD', 'OIL',
-    ];
+    // Pull watchlist from the scraper service (dynamic, user-configurable)
+    const scraper = getScraperService();
+    this.watchlist = scraper.getWatchlist();
   }
 
   async scan(): Promise<ScanResult[]> {
@@ -75,14 +79,44 @@ export class MarketScanner extends EventEmitter {
   }
 
   private async fetchMarketData(symbol: string): Promise<MarketData> {
-    // In production, this would fetch real market data
-    // For now, generate realistic mock data
-    const exchange = this.getExchange(symbol);
-    const basePrice = this.getBasePrice(symbol);
-    const lastPrice = this.lastPrices.get(symbol) || basePrice;
+    // Try live data from the scraper service first
+    const scraper = getScraperService();
+    const livePrice = scraper.getPrice(symbol);
 
-    // Simulate price movement
-    const change = (Math.random() - 0.48) * 0.05; // Slight upward bias
+    if (livePrice) {
+      // Track price history for better RSI calculation
+      this.trackPrice(symbol, livePrice.price);
+
+      return {
+        symbol,
+        exchange: livePrice.exchange,
+        price: livePrice.price,
+        change24h: livePrice.changePercent24h,
+        volume24h: livePrice.volume24h,
+        high24h: livePrice.high24h,
+        low24h: livePrice.low24h,
+      };
+    }
+
+    // Check exchange events (Polymarket, Kalshi)
+    const events = scraper.getExchangeEvents();
+    const event = events.find((e) => e.symbol.toLowerCase() === symbol.toLowerCase());
+    if (event) {
+      return {
+        symbol,
+        exchange: event.exchange,
+        price: event.price,
+        change24h: 0,
+        volume24h: event.volume,
+        high24h: event.price * 1.02,
+        low24h: event.price * 0.98,
+      };
+    }
+
+    // Fallback: simulate with last known price or conservative estimate
+    const exchange = this.getExchange(symbol);
+    const lastPrice = this.lastPrices.get(symbol) || 100;
+    const change = (Math.random() - 0.48) * 0.05;
     const newPrice = lastPrice * (1 + change);
     this.lastPrices.set(symbol, newPrice);
 
@@ -97,24 +131,52 @@ export class MarketScanner extends EventEmitter {
     };
   }
 
+  /** Track price history for RSI/trend calculations */
+  private trackPrice(symbol: string, price: number): void {
+    const history = this.priceHistory.get(symbol) || [];
+    history.push(price);
+    // Keep last 50 data points
+    if (history.length > 50) history.shift();
+    this.priceHistory.set(symbol, history);
+    this.lastPrices.set(symbol, price);
+  }
+
+  /** Calculate RSI from price history (14-period) */
+  private calculateRSI(symbol: string): number | null {
+    const history = this.priceHistory.get(symbol);
+    if (!history || history.length < 15) return null;
+
+    const period = 14;
+    const recent = history.slice(-period - 1);
+    let gains = 0;
+    let losses = 0;
+
+    for (let i = 1; i < recent.length; i++) {
+      const change = recent[i] - recent[i - 1];
+      if (change > 0) gains += change;
+      else losses += Math.abs(change);
+    }
+
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  }
+
   private getExchange(symbol: string): string {
-    if (['BTC', 'ETH', 'SOL', 'DOGE', 'XRP'].includes(symbol)) return 'crypto';
+    if (['BTC', 'ETH', 'SOL', 'DOGE', 'XRP', 'ADA', 'AVAX', 'LINK', 'DOT', 'MATIC'].includes(symbol)) return 'crypto';
     if (['GOLD', 'OIL', 'SILVER'].includes(symbol)) return 'commodities';
     return 'stocks';
   }
 
-  private getBasePrice(symbol: string): number {
-    const prices: Record<string, number> = {
-      SPY: 600, QQQ: 520, AAPL: 265, NVDA: 200, MSFT: 420, GOOGL: 340,
-      AMZN: 248, TSLA: 400, BTC: 75000, ETH: 2400, SOL: 180,
-      GOLD: 4800, OIL: 75,
-    };
-    return prices[symbol] || 100;
-  }
-
   private analyzeMarket(data: MarketData): ScanResult {
-    // Technical analysis simulation
-    const rsi = 30 + Math.random() * 40; // 30-70 range mostly
+    // Use real RSI if we have history, otherwise estimate from change
+    const calculatedRSI = this.calculateRSI(data.symbol);
+    const rsi = calculatedRSI ?? (50 + data.change24h * 2); // Estimate from 24h change
+    const clampedRSI = Math.max(0, Math.min(100, rsi));
+
     const trend = data.change24h > 2 ? 'bullish' : data.change24h < -2 ? 'bearish' : 'neutral';
     const volatility = Math.abs(data.high24h - data.low24h) / data.price;
 
@@ -123,14 +185,14 @@ export class MarketScanner extends EventEmitter {
     let confidence = 0.5;
     let reasoning = '';
 
-    if (rsi < 35 && trend !== 'bearish') {
+    if (clampedRSI < 35 && trend !== 'bearish') {
       signal = 'buy';
-      confidence = 0.6 + (35 - rsi) / 100;
-      reasoning = `RSI oversold at ${rsi.toFixed(1)}, potential reversal`;
-    } else if (rsi > 65 && trend !== 'bullish') {
+      confidence = 0.6 + (35 - clampedRSI) / 100;
+      reasoning = `RSI oversold at ${clampedRSI.toFixed(1)}, potential reversal`;
+    } else if (clampedRSI > 65 && trend !== 'bullish') {
       signal = 'sell';
-      confidence = 0.6 + (rsi - 65) / 100;
-      reasoning = `RSI overbought at ${rsi.toFixed(1)}, potential pullback`;
+      confidence = 0.6 + (clampedRSI - 65) / 100;
+      reasoning = `RSI overbought at ${clampedRSI.toFixed(1)}, potential pullback`;
     } else if (trend === 'bullish' && data.change24h > 3) {
       signal = 'buy';
       confidence = 0.55 + data.change24h / 100;
@@ -143,10 +205,20 @@ export class MarketScanner extends EventEmitter {
       reasoning = 'No clear signal, holding';
     }
 
+    // High volume + signal = higher confidence
+    if (data.volume24h > 1_000_000_000 && signal !== 'hold') {
+      confidence += 0.05;
+      reasoning += ' (high volume confirms)';
+    }
+
     // Determine urgency
     let urgency: 'low' | 'medium' | 'high' = 'low';
     if (confidence > 0.8 || volatility > 0.05) urgency = 'high';
     else if (confidence > 0.65) urgency = 'medium';
+
+    // Dynamic target/stop based on volatility
+    const targetPct = Math.max(0.02, volatility * 1.5);
+    const stopPct = Math.max(0.01, volatility * 0.75);
 
     return {
       id: `${data.symbol}-${Date.now()}`,
@@ -155,13 +227,13 @@ export class MarketScanner extends EventEmitter {
       signal,
       confidence: Math.min(confidence, 0.95),
       price: data.price,
-      targetPrice: signal === 'buy' ? data.price * 1.03 : signal === 'sell' ? data.price * 0.97 : undefined,
-      stopLoss: signal === 'buy' ? data.price * 0.98 : signal === 'sell' ? data.price * 1.02 : undefined,
+      targetPrice: signal === 'buy' ? data.price * (1 + targetPct) : signal === 'sell' ? data.price * (1 - targetPct) : undefined,
+      stopLoss: signal === 'buy' ? data.price * (1 - stopPct) : signal === 'sell' ? data.price * (1 + stopPct) : undefined,
       urgency,
       reasoning,
       timestamp: new Date(),
       indicators: {
-        rsi,
+        rsi: clampedRSI,
         volume: data.volume24h,
         volatility,
         trend,
@@ -173,6 +245,8 @@ export class MarketScanner extends EventEmitter {
 
   setWatchlist(symbols: string[]): void {
     this.watchlist = symbols;
+    // Also sync to scraper service
+    getScraperService().setWatchlist(symbols);
   }
 
   addToWatchlist(symbol: string): void {

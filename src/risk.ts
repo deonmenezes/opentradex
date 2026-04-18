@@ -12,17 +12,45 @@ export interface RiskCheckResult {
 export interface RiskState {
   dailyPnL: number;
   dailyTrades: number;
+  dailyWins: number;
   openPositions: Position[];
   lastReset: string; // ISO date
+  startingCapital: number;
+}
+
+const DEFAULT_STARTING_CAPITAL = 200000;
+
+/** Read starting capital from config (falls back to default) */
+function configStartingCapital(): number {
+  const config = loadConfig();
+  const v = config?.risk?.startingCapital;
+  return Number.isFinite(v) && (v as number) > 0 ? (v as number) : DEFAULT_STARTING_CAPITAL;
 }
 
 // In-memory risk state (would be persisted in production)
 let riskState: RiskState = {
   dailyPnL: 0,
   dailyTrades: 0,
+  dailyWins: 0,
   openPositions: [],
   lastReset: new Date().toISOString().split('T')[0],
+  startingCapital: configStartingCapital(),
 };
+
+/** Current equity = starting capital + realized day P&L + unrealized P&L on open positions */
+export function getEquity(): number {
+  const unrealized = riskState.openPositions.reduce((sum, p) => sum + (p.pnl ?? 0), 0);
+  const base = configStartingCapital();
+  riskState.startingCapital = base;
+  return base + riskState.dailyPnL + unrealized;
+}
+
+/** Set the starting capital (one-time on first run / onboarding) */
+export function setStartingCapital(usd: number): void {
+  if (Number.isFinite(usd) && usd > 0) {
+    riskState.startingCapital = usd;
+  }
+}
 
 /** Get current risk profile from config */
 function getRiskProfile(): RiskProfile {
@@ -43,8 +71,10 @@ function checkDayReset(): void {
     riskState = {
       dailyPnL: 0,
       dailyTrades: 0,
+      dailyWins: 0,
       openPositions: riskState.openPositions, // Keep positions
       lastReset: today,
+      startingCapital: riskState.startingCapital,
     };
   }
 }
@@ -131,6 +161,7 @@ export function closePosition(symbol: string, exchange: string, realizedPnL: num
     riskState.openPositions.splice(idx, 1);
     riskState.dailyPnL += realizedPnL;
     riskState.dailyTrades++;
+    if (realizedPnL > 0) riskState.dailyWins++;
 
     writeAuditLog({
       event: 'position_closed',
@@ -144,6 +175,7 @@ export function closePosition(symbol: string, exchange: string, realizedPnL: num
 /** Get current risk state */
 export function getRiskState(): RiskState {
   checkDayReset();
+  riskState.startingCapital = configStartingCapital();
   return { ...riskState };
 }
 

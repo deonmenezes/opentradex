@@ -6,12 +6,16 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { OpenTradex } from '../index.js';
-import { loadConfig, verifyAuthToken, getModeBadge, readModeLock } from '../config.js';
-import { getRiskState, panicFlatten, isTradingHalted, checkRisk } from '../risk.js';
+import { loadConfig, saveConfig, writeModeLock, defaultConfig, verifyAuthToken, getModeBadge, readModeLock, type TradingMode } from '../config.js';
+import { PROVIDER_ENV, clearProviderKey, listSavedProviders, saveProviderKey, setPreferredProvider, getPreferredProvider } from '../ai/ai-keys.js';
+import { detectCLIs, getProvider } from '../ai/providers/registry.js';
+import { getRiskState, panicFlatten, isTradingHalted, checkRisk, getEquity, recordPosition, closePosition } from '../risk.js';
 import { getAgent, AgentConfig } from '../agent/index.js';
 import { getAI, initializeAI } from '../ai/index.js';
 import { addressFromKey, generatePrivateKey, isPaymentsActive, loadX402Settings, readLedger, saveX402Settings } from '../x402/index.js';
 import type { Exchange } from '../types.js';
+import { getScraperService } from '../scraper/service.js';
+import { getMemory } from '../ai/memory.js';
 
 // Get the directory of this file to find the dashboard
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -20,6 +24,7 @@ export interface GatewayConfig {
   port?: number;
   host?: string;
   requireAuth?: boolean;
+  timeoutMs?: number;
 }
 
 // SSE clients for real-time updates
@@ -29,9 +34,16 @@ const sseClients = new Set<ServerResponse>();
 interface WebSocketClient {
   socket: import('node:net').Socket;
   isAlive: boolean;
+  missedPings: number;
   id: string;
 }
 const wsClients = new Set<WebSocketClient>();
+
+// Backpressure: if a client's outbound buffer exceeds this, we drop them so one slow peer
+// can't balloon memory. 1 MB matches the PRD requirement.
+const WS_SEND_BUFFER_LIMIT = 1024 * 1024;
+// Allow this many consecutive missed pings before we evict a dead client.
+const WS_MAX_MISSED_PINGS = 2;
 
 // WebSocket frame encoding (RFC 6455)
 function encodeWebSocketFrame(data: string): Buffer {
@@ -116,6 +128,20 @@ export function broadcast(type: string, payload: unknown): void {
   // Broadcast to WebSocket clients
   const frame = encodeWebSocketFrame(data);
   for (const client of wsClients) {
+    // Backpressure: if the outbound buffer is above 1 MB the peer can't keep up —
+    // drop them with close-code 1013 (Try Again Later) so one slow client can't OOM us.
+    if (client.socket.writableLength > WS_SEND_BUFFER_LIMIT) {
+      console.warn(`[WS] Evicting slow client ${client.id} (buffer=${client.socket.writableLength}B > ${WS_SEND_BUFFER_LIMIT}B)`);
+      try {
+        const closeFrame = Buffer.from([0x88, 0x02, 0x03, 0xf5]); // FIN+close, len=2, code=1013
+        client.socket.write(closeFrame);
+        client.socket.end();
+      } catch {
+        // already closing
+      }
+      wsClients.delete(client);
+      continue;
+    }
     try {
       client.socket.write(frame);
     } catch {
@@ -186,6 +212,8 @@ function serveStatic(res: ServerResponse, dashboardDir: string, filePath: string
 }
 
 function json(res: ServerResponse, data: unknown, status = 200) {
+  // If the timeout (or another handler) already responded, don't write again.
+  if (res.headersSent || res.writableEnded) return;
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
@@ -195,8 +223,9 @@ function json(res: ServerResponse, data: unknown, status = 200) {
   res.end(JSON.stringify(data, null, 2));
 }
 
-function error(res: ServerResponse, message: string, status = 400) {
-  json(res, { error: message }, status);
+function error(res: ServerResponse, message: string, status = 400, code = 'BAD_REQUEST') {
+  if (res.headersSent) return;
+  json(res, { error: message, code }, status);
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -206,6 +235,21 @@ async function readBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(body));
   });
 }
+
+async function readJsonBody<T = unknown>(req: IncomingMessage): Promise<T> {
+  const body = await readBody(req);
+  if (!body) return {} as T;
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    const err = new Error('Invalid JSON body');
+    (err as Error & { code?: string; status?: number }).code = 'BAD_JSON';
+    (err as Error & { code?: string; status?: number }).status = 400;
+    throw err;
+  }
+}
+
+const GATEWAY_TIMEOUT_MS = 30_000;
 
 function checkAuth(req: IncomingMessage, requireAuth: boolean): boolean {
   if (!requireAuth) return true;
@@ -228,9 +272,11 @@ function checkAuth(req: IncomingMessage, requireAuth: boolean): boolean {
 export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
   const appConfig = loadConfig();
   const defaultHost = appConfig?.bindMode === 'local' ? '127.0.0.1' : '0.0.0.0';
-  const requireAuth = appConfig?.bindMode !== 'local';
+  // Prefer explicit config.requireAuth; otherwise derive from bindMode (non-local ⇒ auth required).
+  const requireAuth =
+    typeof config.requireAuth === 'boolean' ? config.requireAuth : appConfig?.bindMode !== 'local';
 
-  const { port = appConfig?.port || 3210, host = defaultHost } = config;
+  const { port = appConfig?.port || 3210, host = defaultHost, timeoutMs = GATEWAY_TIMEOUT_MS } = config;
 
   // Find dashboard
   const dashboardDir = findDashboardDir();
@@ -256,7 +302,22 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
     const protectedExact = ['/scan', '/search', '/quote', '/orderbook', '/risk', '/risk/check', '/command', '/panic', '/config', '/events', '/agent', '/ai', '/x402'];
     const isApiRoute = protectedPrefixes.some((p) => path.startsWith(p)) || protectedExact.includes(path);
     if (isApiRoute && path !== '/api/health' && !checkAuth(req, requireAuth)) {
-      return error(res, 'Unauthorized', 401);
+      return error(res, 'Unauthorized', 401, 'UNAUTHORIZED');
+    }
+
+    // Streaming/persistent connections are exempt from the gateway timeout
+    const isStreamingRoute = path === '/events' || path === '/api/events';
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    if (!isStreamingRoute) {
+      timeoutHandle = setTimeout(() => {
+        if (!res.headersSent) {
+          try {
+            json(res, { error: 'Gateway timeout', code: 'TIMEOUT' }, 504);
+          } catch {
+            // socket may already be torn down
+          }
+        }
+      }, timeoutMs);
     }
 
     try {
@@ -372,12 +433,18 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         const halted = isTradingHalted();
         const config = loadConfig();
 
+        const equity = getEquity();
+        const winRate = state.dailyTrades > 0 ? (state.dailyWins / state.dailyTrades) * 100 : 0;
         return json(res, {
           state: {
             dailyPnL: state.dailyPnL,
             dailyTrades: state.dailyTrades,
+            dailyWins: state.dailyWins,
+            winRate,
             openPositions: state.openPositions,
             lastReset: state.lastReset,
+            startingCapital: state.startingCapital,
+            equity,
           },
           halted: halted.halted,
           haltReason: halted.reason,
@@ -402,21 +469,29 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
 
         // Try AI first if available
         const ai = getAI();
+        const memory = getMemory();
+        const memoryUserId = 'local';
         if (ai.isAvailable()) {
           try {
-            // Enhance command with live market data for certain queries
             let enhancedCommand = command;
             if (command.toLowerCase().includes('scan') || command.toLowerCase().includes('market')) {
               const markets = await harness.scanAll(5);
               enhancedCommand = `${command}\n\nCurrent Market Data:\n${markets.map((m) => `- ${m.exchange}: ${m.symbol} @ $${m.price}`).join('\n')}`;
             }
 
+            const recalled = await memory.recall(memoryUserId, command);
+            const memoryBlock = memory.formatForPrompt(recalled);
+            if (memoryBlock) {
+              enhancedCommand = `${memoryBlock}\n\n---\n\nThe user's new message (respond to THIS, not to the history above):\n\n${enhancedCommand}`;
+            }
+
             const aiResponse = await ai.chat(enhancedCommand);
             response = aiResponse.content;
             aiUsed = true;
+
+            void memory.remember({ userId: memoryUserId, userMessage: command, assistantMessage: response });
           } catch (err) {
             console.error('[AI] Command error:', err);
-            // Fall back to basic handling
           }
         }
 
@@ -534,6 +609,25 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         const config = body ? JSON.parse(body) : {};
         const agent = getAgent(config as Partial<AgentConfig>);
 
+        // Wire agent → harness risk state (one-time listener install)
+        const a = agent as unknown as { _harnessWired?: boolean };
+        if (!a._harnessWired) {
+          a._harnessWired = true;
+          agent.on('trade', (trade: { symbol: string; side: 'buy' | 'sell'; quantity: number; price: number }) => {
+            recordPosition({
+              exchange: 'crypto',
+              symbol: trade.symbol,
+              side: trade.side === 'buy' ? 'long' : 'short',
+              size: trade.quantity,
+              avgPrice: trade.price,
+              currentPrice: trade.price,
+              pnl: 0,
+              pnlPercent: 0,
+            });
+            broadcast('trade', trade);
+          });
+        }
+
         await agent.start();
         broadcast('agent', { event: 'started', status: agent.getStatus() });
 
@@ -601,7 +695,141 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
       // AI providers — list all registered backends with configured/active status
       if (path === '/ai/providers' || path === '/api/ai/providers') {
         const ai = getAI();
-        return json(res, { providers: ai.providerStatus() });
+        return json(res, {
+          providers: ai.providerStatus(),
+          saved: listSavedProviders(),
+          preferred: getPreferredProvider() ?? null,
+        });
+      }
+
+      // CLI detection — probes PATH for claude/opencode/gemini/ollama so the
+      // setup wizard can offer zero-config one-click setup when the user has
+      // already installed one of these tools.
+      if (path === '/ai/cli-detect' || path === '/api/ai/cli-detect') {
+        const detections = detectCLIs().map((d) => {
+          const provider = getProvider(d.provider);
+          return {
+            ...d,
+            configured: provider?.isConfigured() === true,
+            defaultModel: provider?.defaultModel ?? null,
+          };
+        });
+        return json(res, { detected: detections });
+      }
+
+      // Set the user's preferred orchestrator provider — usually a CLI pick
+      // from the "Detected on your system" list. Persists to ai-keys.json and
+      // sets OPENTRADEX_ROLE_ORCHESTRATOR so the registry routes through it.
+      if ((path === '/ai/preferred' || path === '/api/ai/preferred') && req.method === 'POST') {
+        const { provider } = await readJsonBody<{ provider?: string | null }>(req);
+        if (provider !== null && typeof provider !== 'string') {
+          return error(res, 'provider must be a string or null', 400, 'BAD_REQUEST');
+        }
+        if (provider) {
+          const registered = getProvider(provider);
+          if (!registered) return error(res, `Unknown provider: ${provider}`, 400, 'UNKNOWN_PROVIDER');
+          if (!registered.isConfigured()) {
+            return error(res, `${provider} is not configured on this machine`, 400, 'NOT_CONFIGURED');
+          }
+        }
+        setPreferredProvider(provider ?? null);
+        getAI().initialize();
+        broadcast('ai', { event: 'preferred-changed', provider: provider ?? null });
+        return json(res, { ok: true, preferred: provider ?? null });
+      }
+
+      // Save an API key for a provider (persists to ~/.opentradex/ai-keys.json
+      // and hydrates process.env in-process so the provider becomes active immediately).
+      if ((path === '/ai/providers/save' || path === '/api/ai/providers/save') && req.method === 'POST') {
+        const { provider, apiKey } = await readJsonBody<{ provider?: string; apiKey?: string }>(req);
+        if (!provider || !apiKey) return error(res, 'provider and apiKey are required', 400, 'BAD_REQUEST');
+        if (!PROVIDER_ENV[provider]) return error(res, `Unknown provider: ${provider}`, 400, 'UNKNOWN_PROVIDER');
+        try {
+          saveProviderKey(provider, apiKey);
+          // Re-initialise so the in-memory AI singleton picks up the new env var
+          getAI().initialize();
+          broadcast('ai', { event: 'provider-saved', provider });
+          return json(res, { ok: true, provider });
+        } catch (e) {
+          return error(res, e instanceof Error ? e.message : 'Save failed', 400, 'SAVE_FAILED');
+        }
+      }
+
+      // Delete a saved provider key (clears file + env var).
+      if ((path === '/ai/providers/delete' || path === '/api/ai/providers/delete') && req.method === 'POST') {
+        const { provider } = await readJsonBody<{ provider?: string }>(req);
+        if (!provider) return error(res, 'provider is required', 400, 'BAD_REQUEST');
+        clearProviderKey(provider);
+        getAI().initialize();
+        broadcast('ai', { event: 'provider-deleted', provider });
+        return json(res, { ok: true, provider });
+      }
+
+      // Test an API key against the provider — does NOT persist. Sends "say hi" and
+      // returns { ok, latencyMs, model, content?, error? } so the wizard can show
+      // inline success/error without committing a bad key to disk.
+      if ((path === '/ai/providers/test' || path === '/api/ai/providers/test') && req.method === 'POST') {
+        const { provider, apiKey } = await readJsonBody<{ provider?: string; apiKey?: string }>(req);
+        if (!provider || !apiKey) return error(res, 'provider and apiKey are required', 400, 'BAD_REQUEST');
+        const envKey = PROVIDER_ENV[provider];
+        if (!envKey) return error(res, `Unknown provider: ${provider}`, 400, 'UNKNOWN_PROVIDER');
+
+        // Swap the env var just for this call, then restore — so we never accidentally
+        // leak a failing key into future requests and we don't clobber a good one.
+        const prev = process.env[envKey];
+        process.env[envKey] = apiKey.trim();
+        const started = Date.now();
+        try {
+          const p = getAI().providerStatus().find((x) => x.name === provider);
+          // Force re-init so the provider sees the fresh env var.
+          getAI().initialize();
+          const response = await getAI().chat('Reply with exactly the word: ok', {
+            provider,
+            includeContext: false,
+            maxTokens: 16,
+          });
+          const latencyMs = Date.now() - started;
+          const ok = !!response.content && !response.content.startsWith('AI Error');
+          return json(res, {
+            ok,
+            latencyMs,
+            model: response.model || p?.defaultModel || 'unknown',
+            content: response.content.slice(0, 200),
+            error: ok ? undefined : response.content,
+          });
+        } catch (e) {
+          const latencyMs = Date.now() - started;
+          return json(res, {
+            ok: false,
+            latencyMs,
+            error: e instanceof Error ? e.message : 'Test failed',
+          });
+        } finally {
+          if (prev === undefined) delete process.env[envKey];
+          else process.env[envKey] = prev;
+          getAI().initialize();
+        }
+      }
+
+      // Update trading mode — writes config.tradingMode + mode.lock. The lock is
+      // irreversible for paper-only (downstream enforces), but the gateway always
+      // accepts the write so the UI stays authoritative.
+      if ((path === '/mode' || path === '/api/mode') && req.method === 'POST') {
+        const { mode } = await readJsonBody<{ mode?: string }>(req);
+        const allowed: TradingMode[] = ['paper-only', 'paper-default', 'live-allowed'];
+        if (!mode || !allowed.includes(mode as TradingMode)) {
+          return error(res, `mode must be one of: ${allowed.join(', ')}`, 400, 'BAD_MODE');
+        }
+        const currentLock = readModeLock();
+        if (currentLock === 'paper-only' && mode !== 'paper-only') {
+          return error(res, 'Paper-only mode is locked on this machine. Run `opentradex onboard` to change it.', 409, 'MODE_LOCKED');
+        }
+        const cfg = loadConfig() || defaultConfig();
+        cfg.tradingMode = mode as TradingMode;
+        saveConfig(cfg);
+        writeModeLock(mode as TradingMode);
+        broadcast('mode', { mode });
+        return json(res, { ok: true, mode });
       }
 
       // AI Chat (direct) — accepts optional provider/model/role routing
@@ -655,6 +883,75 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
 
         const response = await ai.explainRisk();
         return json(res, response);
+      }
+
+      // ============ SCRAPER ROUTES ============
+
+      // Scraper status + full snapshot (dashboard hydration)
+      if (path === '/api/scraper' || path === '/api/scraper/snapshot') {
+        const scraper = getScraperService();
+        return json(res, {
+          running: scraper.isRunning(),
+          ...scraper.getSnapshot(),
+        });
+      }
+
+      // Live prices
+      if (path === '/api/scraper/prices') {
+        const scraper = getScraperService();
+        const symbol = params.get('symbol');
+        if (symbol) {
+          const price = scraper.getPrice(symbol.toUpperCase());
+          return json(res, price ?? { error: 'Symbol not found' });
+        }
+        return json(res, { prices: scraper.getAllPrices() });
+      }
+
+      // Live news feed
+      if (path === '/api/scraper/news') {
+        const scraper = getScraperService();
+        const limit = parseInt(params.get('limit') || '50');
+        return json(res, { news: scraper.getNews(limit) });
+      }
+
+      // Exchange events (Polymarket, Kalshi, Binance)
+      if (path === '/api/scraper/exchanges') {
+        const scraper = getScraperService();
+        const exchange = params.get('exchange');
+        return json(res, { events: scraper.getExchangeEvents(exchange || undefined) });
+      }
+
+      // Force refresh all scraped data
+      if ((path === '/api/scraper/refresh') && req.method === 'POST') {
+        const scraper = getScraperService();
+        await scraper.forceRefresh();
+        return json(res, { ok: true, ...scraper.getSnapshot() });
+      }
+
+      // Update scraper watchlist
+      if ((path === '/api/scraper/watchlist') && req.method === 'POST') {
+        const body = await readBody(req);
+        const { symbols } = JSON.parse(body);
+        if (!Array.isArray(symbols)) return error(res, 'symbols must be an array');
+        const scraper = getScraperService();
+        scraper.setWatchlist(symbols);
+        return json(res, { ok: true, watchlist: scraper.getWatchlist() });
+      }
+
+      if (path === '/api/scraper/watchlist' && req.method === 'GET') {
+        const scraper = getScraperService();
+        return json(res, { watchlist: scraper.getWatchlist() });
+      }
+
+      // Any unmatched API / agent / AI / x402 path must 404 as JSON — never fall through to the SPA.
+      if (
+        path.startsWith('/api/') ||
+        path.startsWith('/agent/') ||
+        path.startsWith('/ai/') ||
+        path.startsWith('/x402/') ||
+        protectedExact.includes(path)
+      ) {
+        return error(res, 'Not found', 404, 'NOT_FOUND');
       }
 
       // ============ DASHBOARD UI ============
@@ -728,10 +1025,30 @@ POST /api/panic       Emergency stop
         return;
       }
 
-      return error(res, 'Not found', 404);
+      return error(res, 'Not found', 404, 'NOT_FOUND');
     } catch (err) {
       console.error('Gateway error:', err);
-      return error(res, err instanceof Error ? err.message : 'Internal error', 500);
+      const e = err as Error & { code?: string; status?: number };
+      let status = typeof e.status === 'number' ? e.status : 500;
+      let code = e.code || (status === 500 ? 'INTERNAL' : 'ERROR');
+      // Malformed JSON body → 400
+      if (err instanceof SyntaxError) {
+        status = 400;
+        code = 'BAD_JSON';
+      }
+      return error(res, e.message || 'Internal error', status, code);
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+  });
+
+  // Catch unhandled errors on the HTTP server itself
+  server.on('clientError', (err, socket) => {
+    console.error('Gateway clientError:', err);
+    try {
+      socket.end('HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{"error":"Bad Request","code":"BAD_REQUEST"}');
+    } catch {
+      // socket already destroyed
     }
   });
 
@@ -779,7 +1096,7 @@ POST /api/panic       Emergency stop
     );
 
     const clientId = Date.now().toString(36) + Math.random().toString(36).substring(2);
-    const client: WebSocketClient = { socket, isAlive: true, id: clientId };
+    const client: WebSocketClient = { socket, isAlive: true, missedPings: 0, id: clientId };
     wsClients.add(client);
 
     console.log(`[WS] Client connected: ${clientId} (${wsClients.size} total)`);
@@ -821,10 +1138,14 @@ POST /api/panic       Emergency stop
 
         if (frame.opcode === 0x0a) {
           client.isAlive = true;
+          client.missedPings = 0;
           continue;
         }
 
         if (frame.opcode === 0x01) {
+          // Any text frame from a client also proves liveness
+          client.isAlive = true;
+          client.missedPings = 0;
           try {
             const msg = JSON.parse(frame.payload);
             if (msg.type === 'ping') {
@@ -848,13 +1169,23 @@ POST /api/panic       Emergency stop
     });
   });
 
-  // WebSocket heartbeat to detect dead connections
+  // WebSocket heartbeat to detect dead connections.
+  // Each tick, clients who haven't responded since the last ping have their missedPings
+  // counter bumped; when they hit WS_MAX_MISSED_PINGS consecutive misses, we evict them.
   const wsHeartbeat = setInterval(() => {
     for (const client of wsClients) {
       if (!client.isAlive) {
-        wsClients.delete(client);
-        client.socket.destroy();
-        continue;
+        client.missedPings += 1;
+        if (client.missedPings >= WS_MAX_MISSED_PINGS) {
+          console.warn(`[WS] Evicting unresponsive client ${client.id} (${client.missedPings} missed pings)`);
+          wsClients.delete(client);
+          try {
+            client.socket.destroy();
+          } catch {
+            // ignore
+          }
+          continue;
+        }
       }
       client.isAlive = false;
       // Send ping
@@ -872,8 +1203,31 @@ POST /api/panic       Emergency stop
   return {
     start() {
       return new Promise<void>((resolve) => {
-        server.listen(port, host, () => {
+        server.listen(port, host, async () => {
           const badge = getModeBadge();
+
+          // Start the scraper service and wire events to broadcast
+          const scraper = getScraperService();
+          scraper.on('prices', (prices) => broadcast('prices', prices));
+          scraper.on('news', (news) => {
+            broadcast('news', news);
+            // Also push individual items as feed events for the dashboard
+            for (const item of news.slice(0, 5)) {
+              broadcast('feed', {
+                id: item.id,
+                title: item.title,
+                summary: item.summary,
+                source: item.source,
+                url: item.url,
+                age: item.age,
+                category: item.category,
+                tickers: item.tickers,
+                sentiment: item.sentiment,
+              });
+            }
+          });
+          scraper.on('exchanges', (events) => broadcast('exchanges', events));
+          await scraper.start().catch((err) => console.error('[Scraper] Start error:', err));
           const isRemote = host === '0.0.0.0';
           const hasDashboard = dashboardDir !== null;
 

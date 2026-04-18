@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OpenTradex } from '../index.js';
 import { createGateway } from '../gateway/index.js';
-import { runOnboard, runX402Onboard, showStatus } from '../onboard.js';
+import { runOnboard, runFastOnboard, runX402Onboard, showStatus } from '../onboard.js';
 import {
   isOnboarded,
   loadConfig,
@@ -70,7 +70,12 @@ async function main(): Promise<void> {
     // ============ SETUP ============
     case 'onboard': {
       const paperOnly = args.includes('--paper-only');
-      await runOnboard(paperOnly);
+      const full = args.includes('--full');
+      if (full) {
+        await runOnboard(paperOnly);
+      } else {
+        await runFastOnboard({ paperOnly });
+      }
       break;
     }
 
@@ -366,7 +371,7 @@ async function main(): Promise<void> {
 \x1b[1mOpenTradex\x1b[0m v${VERSION} - Multi-market AI trading harness
 
 \x1b[1mSETUP\x1b[0m
-  opentradex onboard [--paper-only]   Configure OpenTradex
+  opentradex onboard [--paper-only]   Quick setup (5 prompts; --full for the long flow)
   opentradex status                   Show current configuration
 
 \x1b[1mRUNNING\x1b[0m

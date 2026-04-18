@@ -3,7 +3,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 // Directory paths
 export const CONFIG_DIR = join(homedir(), '.opentradex');
@@ -30,6 +30,7 @@ export interface RailConfig {
 
 /** Risk profile configuration */
 export interface RiskProfile {
+  startingCapital?: number;
   maxPositionUsd: number;
   maxDailyLossUsd: number;
   maxOpenPositions: number;
@@ -77,9 +78,10 @@ export function defaultConfig(): OpenTradexConfig {
       rss: { feeds: [] },
     },
     risk: {
-      maxPositionUsd: 100,
-      maxDailyLossUsd: 50,
-      maxOpenPositions: 3,
+      startingCapital: 200000,
+      maxPositionUsd: 2000,
+      maxDailyLossUsd: 1000,
+      maxOpenPositions: 5,
       perTradePercent: 5,
       dailyDDKill: 10,
     },
@@ -174,12 +176,23 @@ export function saveAuthToken(token: string): void {
   writeFileSync(AUTH_FILE, JSON.stringify({ hash: hashed, createdAt: new Date().toISOString() }));
 }
 
-/** Verify auth token */
+/** Verify auth token with constant-time comparison (prevents timing attacks) */
 export function verifyAuthToken(token: string): boolean {
   if (!existsSync(AUTH_FILE)) return false;
+  if (typeof token !== 'string' || token.length === 0) return false;
   try {
-    const data = JSON.parse(readFileSync(AUTH_FILE, 'utf-8'));
-    return data.hash === hashToken(token);
+    const data = JSON.parse(readFileSync(AUTH_FILE, 'utf-8')) as { hash?: string };
+    const stored = data?.hash;
+    if (typeof stored !== 'string' || stored.length === 0) return false;
+
+    const a = Buffer.from(stored, 'hex');
+    const b = Buffer.from(hashToken(token), 'hex');
+    if (a.length !== b.length) {
+      // Still do a constant-time compare so timing stays independent of hash length
+      timingSafeEqual(b, b);
+      return false;
+    }
+    return timingSafeEqual(a, b);
   } catch {
     return false;
   }

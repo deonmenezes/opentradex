@@ -4,6 +4,13 @@
 
 import { EventEmitter } from 'events';
 import { ScanResult } from './scanner.js';
+import { loadConfig } from '../config.js';
+
+function initialEquity(): number {
+  const cfg = loadConfig();
+  const v = cfg?.risk?.startingCapital;
+  return Number.isFinite(v) && (v as number) > 0 ? (v as number) : 200000;
+}
 
 export interface RiskLimits {
   maxPositionSize: number;
@@ -31,15 +38,18 @@ interface Position {
 export class RiskManager extends EventEmitter {
   private limits: RiskLimits;
   private dailyPnL = 0;
-  private peakEquity = 10000; // Starting capital
-  private currentEquity = 10000;
+  private peakEquity: number;
+  private currentEquity: number;
   private positions: Map<string, Position> = new Map();
 
   constructor(limits: RiskLimits) {
     super();
+    const eq = initialEquity();
+    this.peakEquity = eq;
+    this.currentEquity = eq;
     this.limits = {
       maxOpenPositions: 10,
-      maxSingleTradeRisk: 0.02, // 2% of equity
+      maxSingleTradeRisk: 0.05, // 5% of equity — paper sim needs room to place trades
       ...limits,
     };
   }

@@ -1,6 +1,7 @@
 /** Interactive onboarding wizard for OpenTradex */
 
-import { createInterface } from 'node:readline';
+import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
+import { networkInterfaces } from 'node:os';
 import {
   ensureConfigDir,
   saveConfig,
@@ -15,15 +16,23 @@ import {
   type BindMode,
   type OpenTradexConfig,
 } from './config.js';
+import { PROVIDER_ENV, saveProviderKey } from './ai/ai-keys.js';
 
-const rl = createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
+// Lazy readline so importing this module in tests doesn't hold stdin open.
+let rl: ReadlineInterface | null = null;
+function getRL(): ReadlineInterface {
+  if (!rl) {
+    rl = createInterface({ input: process.stdin, output: process.stdout });
+  }
+  return rl;
+}
+function closeRL(): void {
+  if (rl) { try { rl.close(); } catch { /* noop */ } rl = null; }
+}
 
 function ask(question: string): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+    getRL().question(question, (answer) => resolve(answer.trim()));
   });
 }
 
@@ -75,6 +84,277 @@ async function askNumber(prompt: string, defaultValue: number): Promise<number> 
   return isNaN(num) ? defaultValue : num;
 }
 
+/** Pick the first non-internal IPv4 address on the box (for pair URL hints). */
+function getLanIp(): string | null {
+  const ifaces = networkInterfaces();
+  for (const list of Object.values(ifaces)) {
+    if (!list) continue;
+    for (const net of list) {
+      if (net.family === 'IPv4' && !net.internal) return net.address;
+    }
+  }
+  return null;
+}
+
+export interface FastOnboardOptions {
+  /** Skip all prompts except AI provider — forces paper-only + local bind. */
+  paperOnly?: boolean;
+  /**
+   * Override inputs (bypass prompts). When set, takes precedence over env vars.
+   * Exposed so tests can drive the flow deterministically.
+   */
+  inputs?: Partial<{
+    mode: TradingMode;
+    aiProvider: string;         // provider id in PROVIDER_ENV, or "skip"
+    aiKey: string;
+    startingCapital: number;
+    bindMode: BindMode;
+  }>;
+  /** Force non-TTY behaviour (env-var only) for tests / CI. */
+  forceNonInteractive?: boolean;
+  /** Inject a readline.Interface for testing (otherwise uses the module-level rl). */
+  ioOverride?: { ask: (q: string) => Promise<string>; print: (m: string) => void };
+}
+
+export interface FastOnboardResult {
+  config: OpenTradexConfig;
+  authToken?: string;
+  aiProviderConfigured: string | null;
+  summary: {
+    gatewayUrl: string;
+    nextStepCommand: string;
+    pairInfo?: { host: string; token: string };
+    /** Absolute path of pair.svg written when bindMode != local. */
+    pairSvgPath?: string;
+    /** JSON payload embedded in the QR (v1 envelope). */
+    pairEncoded?: string;
+  };
+}
+
+/**
+ * Streamlined onboarding: 5 prompts for the default flow, 1 prompt for
+ * --paper-only, 0 prompts for CI (env-var driven). Writes the same config
+ * files as the full flow but skips the rail / x402 / MCP questions — users
+ * who need those can run `opentradex onboard --full` later.
+ */
+export async function runFastOnboard(opts: FastOnboardOptions = {}): Promise<FastOnboardResult> {
+  const envMode = (process.env.OPENTRADEX_MODE || '').toLowerCase();
+  const envProvider = process.env.OPENTRADEX_AI_PROVIDER;
+  const envKey = process.env.OPENTRADEX_AI_KEY;
+  const envBind = (process.env.OPENTRADEX_BIND || '').toLowerCase();
+  const envCapitalRaw = process.env.OPENTRADEX_CAPITAL;
+
+  // Decide interactivity: env-driven when explicitly forced, when there's no
+  // TTY on stdin, or when every answer already comes from env vars / opts.
+  const hasTTY = !!(process.stdin.isTTY && process.stdout.isTTY);
+  const allInputsViaEnv =
+    (opts.paperOnly || envMode || opts.inputs?.mode)
+    && (envProvider || opts.inputs?.aiProvider);
+  const interactive = !opts.forceNonInteractive && hasTTY && !allInputsViaEnv;
+
+  const io = opts.ioOverride ?? { ask, print };
+
+  io.print('');
+  io.print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  io.print('  OpenTradex — quick setup');
+  io.print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  io.print('');
+
+  const config = defaultConfig();
+
+  // --- Prompt 1 of 5: trading mode -----------------------------------------
+  let mode: TradingMode;
+  if (opts.paperOnly) {
+    mode = 'paper-only';
+    io.print('Mode: paper-only (locked by --paper-only flag)');
+  } else if (opts.inputs?.mode) {
+    mode = opts.inputs.mode;
+  } else if (envMode === 'paper-only' || envMode === 'paper-default' || envMode === 'live-allowed') {
+    mode = envMode as TradingMode;
+  } else if (!interactive) {
+    mode = 'paper-only';
+  } else {
+    const stayPaper = await askYesNoVia(io.ask, 'Paper-only mode? (safest, no real money ever)', true);
+    mode = stayPaper ? 'paper-only' : 'paper-default';
+  }
+  config.tradingMode = mode;
+
+  // --- Prompt 2 of 5: AI provider -----------------------------------------
+  const inputProvider = opts.inputs?.aiProvider ?? envProvider ?? undefined;
+  const inputKey = opts.inputs?.aiKey ?? envKey ?? undefined;
+  let aiProviderConfigured: string | null = null;
+  if (inputProvider && inputProvider !== 'skip') {
+    if (!PROVIDER_ENV[inputProvider]) {
+      io.print(`Unknown AI provider: ${inputProvider} — skipping`);
+    } else if (!inputKey) {
+      io.print(`OPENTRADEX_AI_KEY not set for provider ${inputProvider} — skipping`);
+    } else {
+      try {
+        saveProviderKey(inputProvider, inputKey);
+        aiProviderConfigured = inputProvider;
+        io.print(`AI: ${inputProvider} key saved`);
+      } catch (e) {
+        io.print(`AI key save failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      }
+    }
+  } else if (!interactive) {
+    io.print('AI: skipped (set OPENTRADEX_AI_PROVIDER + OPENTRADEX_AI_KEY to auto-configure)');
+  } else {
+    const knownProviders = Object.keys(PROVIDER_ENV);
+    const list = knownProviders.join(', ');
+    io.print('');
+    io.print(`AI providers: ${list}`);
+    const provider = (await io.ask(`AI provider (or Enter to skip) [openai]: `)).trim().toLowerCase();
+    if (provider && provider !== 'skip') {
+      if (!PROVIDER_ENV[provider]) {
+        io.print(`Unknown provider: ${provider} — skipping`);
+      } else {
+        const key = (await io.ask(`${provider} API key (hidden): `)).trim();
+        if (!key) {
+          io.print('No key — skipping.');
+        } else {
+          try {
+            saveProviderKey(provider, key);
+            aiProviderConfigured = provider;
+            io.print(`AI: ${provider} key saved`);
+          } catch (e) {
+            io.print(`AI key save failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+          }
+        }
+      }
+    }
+  }
+
+  // --- Prompt 3 of 5: starting capital (skipped on --paper-only) -----------
+  if (!opts.paperOnly) {
+    if (typeof opts.inputs?.startingCapital === 'number') {
+      config.risk.startingCapital = opts.inputs.startingCapital;
+    } else if (envCapitalRaw && !Number.isNaN(Number(envCapitalRaw))) {
+      config.risk.startingCapital = Number(envCapitalRaw);
+    } else if (!interactive) {
+      config.risk.startingCapital = 10000;
+    } else {
+      config.risk.startingCapital = await askNumberVia(io.ask, 'Starting capital (USD)', 10000);
+    }
+  } else {
+    config.risk.startingCapital = config.risk.startingCapital ?? 10000;
+  }
+
+  // --- Prompt 4 of 5: bind mode (skipped on --paper-only) ------------------
+  if (!opts.paperOnly) {
+    if (opts.inputs?.bindMode) {
+      config.bindMode = opts.inputs.bindMode;
+    } else if (envBind === 'local' || envBind === 'lan' || envBind === 'tunnel') {
+      config.bindMode = envBind as BindMode;
+    } else if (!interactive) {
+      config.bindMode = 'local';
+    } else {
+      const answer = (await io.ask('Network: [1] local (default)  [2] lan  [3] tunnel: ')).trim();
+      config.bindMode = answer === '2' ? 'lan' : answer === '3' ? 'tunnel' : 'local';
+    }
+  } else {
+    config.bindMode = 'local';
+  }
+
+  // Generate + save auth token when we're not local.
+  let authToken: string | undefined;
+  if (config.bindMode !== 'local') {
+    authToken = generateAuthToken();
+    saveAuthToken(authToken);
+  }
+
+  // --- Persist -------------------------------------------------------------
+  ensureConfigDir();
+  writeModeLock(config.tradingMode);
+  saveConfig(config);
+
+  // --- Prompt 5 of 5: done summary ----------------------------------------
+  const lanIp = getLanIp();
+  const hostForPair = config.bindMode === 'local'
+    ? `http://127.0.0.1:${config.port}`
+    : `http://${lanIp ?? '<your-lan-ip>'}:${config.port}`;
+  const gatewayUrl = config.bindMode === 'local'
+    ? `http://localhost:${config.port}`
+    : hostForPair;
+
+  io.print('');
+  io.print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  io.print('  Setup complete');
+  io.print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  io.print(`  Mode:        ${config.tradingMode}`);
+  io.print(`  Network:     ${config.bindMode} on port ${config.port}`);
+  io.print(`  Gateway URL: ${gatewayUrl}`);
+  if (aiProviderConfigured) io.print(`  AI provider: ${aiProviderConfigured}`);
+  if (!opts.paperOnly) {
+    io.print(`  Capital:     $${(config.risk.startingCapital ?? 0).toLocaleString()}`);
+  }
+  let pairSvgPath: string | undefined;
+  let pairEncoded: string | undefined;
+  if (authToken) {
+    io.print('');
+    io.print('  Auth token (save — shown once):');
+    io.print(`    ${authToken}`);
+    io.print('');
+    try {
+      const { makePairArtifacts } = await import('./pair-qr.js');
+      const artifacts = await makePairArtifacts(
+        { host: hostForPair, token: authToken },
+        CONFIG_DIR
+      );
+      pairSvgPath = artifacts.svgPath;
+      pairEncoded = artifacts.encoded;
+      io.print('  Scan this QR on your phone to pair:');
+      io.print('');
+      for (const line of artifacts.ascii.split('\n')) io.print(line);
+      io.print(`  (also saved as SVG: ${artifacts.svgPath})`);
+      io.print('');
+      io.print('  QR payload (if scanner cannot read it):');
+      io.print(`    ${artifacts.encoded}`);
+    } catch (e) {
+      io.print(`  QR render failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      io.print(`  Pair JSON: {"host":"${hostForPair}","token":"${authToken}"}`);
+    }
+  }
+  io.print('');
+  io.print('  Next step:');
+  io.print('    opentradex run');
+  io.print('');
+
+  // Close the shared readline when we own it — otherwise Node keeps stdin
+  // open and the CLI hangs after the summary prints.
+  if (!opts.ioOverride) {
+    closeRL();
+  }
+
+  return {
+    config,
+    authToken,
+    aiProviderConfigured,
+    summary: {
+      gatewayUrl,
+      nextStepCommand: 'opentradex run',
+      pairInfo: authToken ? { host: hostForPair, token: authToken } : undefined,
+      pairSvgPath,
+      pairEncoded,
+    },
+  };
+}
+
+/** Readline-backed helper used when ioOverride is not supplied. */
+async function askYesNoVia(asker: (q: string) => Promise<string>, prompt: string, defaultYes = true): Promise<boolean> {
+  const hint = defaultYes ? '[Y/n]' : '[y/N]';
+  const answer = (await asker(`${prompt} ${hint}: `)).trim();
+  if (!answer) return defaultYes;
+  return answer.toLowerCase().startsWith('y');
+}
+
+async function askNumberVia(asker: (q: string) => Promise<string>, prompt: string, defaultValue: number): Promise<number> {
+  const answer = (await asker(`${prompt} [${defaultValue}]: `)).trim();
+  if (!answer) return defaultValue;
+  const num = parseFloat(answer);
+  return Number.isNaN(num) ? defaultValue : num;
+}
+
 export async function runOnboard(paperOnly = false): Promise<void> {
   header('OpenTradex Onboarding');
 
@@ -88,7 +368,7 @@ export async function runOnboard(paperOnly = false): Promise<void> {
     const proceed = await askYesNo('Reconfigure OpenTradex?', false);
     if (!proceed) {
       print('\nOnboarding cancelled. Existing config preserved.');
-      rl.close();
+      closeRL();
       return;
     }
   }
@@ -408,7 +688,7 @@ export async function runOnboard(paperOnly = false): Promise<void> {
   print('  opentradex status   Show current configuration');
   print('  opentradex panic    Emergency stop all trading');
 
-  rl.close();
+  closeRL();
 }
 
 /**
