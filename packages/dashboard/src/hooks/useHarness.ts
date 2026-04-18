@@ -113,6 +113,11 @@ export function useHarness() {
         }
         return [payload, ...prev];
       });
+    } else if (data.type === 'positions') {
+      // Full positions-array replacement (emitted after close/reduce/add)
+      const payload = data.payload as { positions: Position[] } | Position[];
+      const list = Array.isArray(payload) ? payload : payload?.positions;
+      if (Array.isArray(list)) setPositions(list);
     } else if (data.type === 'trade') {
       setTrades((prev) => [data.payload as Trade, ...prev.slice(0, 19)]);
     } else if (data.type === 'feed') {

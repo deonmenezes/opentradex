@@ -11,7 +11,7 @@
  */
 
 import { getAgent, AgentConfig } from '../agent/index.js';
-import { getRiskState, panicFlatten, getOpenPositions } from '../risk.js';
+import { getRiskState, panicFlatten, getOpenPositions, closePosition as closeHarnessPosition, recordPosition } from '../risk.js';
 import { getAI } from './index.js';
 import type { OpenTradex } from '../index.js';
 
@@ -390,6 +390,142 @@ const INTENTS: Intent[] = [
       } catch (err) {
         return { action: 'trade.buy.rejected', reply: `Buy rejected: ${(err as Error).message}` };
       }
+    },
+  },
+
+  // CLOSE POSITION — dashboard Close button: "close position SOL on crypto"
+  {
+    name: 'position.close',
+    help: 'close position <SYMBOL> on <EXCHANGE> — flatten a position',
+    pattern: /^\s*close\s+position\s+([A-Za-z0-9/._-]+)\s+on\s+([A-Za-z][A-Za-z0-9_-]*)/i,
+    handler: (match, _c, ctx) => {
+      const symbol = match[1].toUpperCase();
+      const exchange = match[2].toLowerCase();
+      const positions = getOpenPositions();
+      const pos = positions.find(
+        (p) => p.symbol.toUpperCase() === symbol && p.exchange.toLowerCase() === exchange
+      );
+      if (!pos) {
+        return { action: 'position.close.miss', reply: `No open ${symbol} position on ${exchange}.` };
+      }
+      const direction = pos.side === 'long' || pos.side === 'yes' ? 1 : -1;
+      const pnl = (pos.currentPrice - pos.avgPrice) * pos.size * direction;
+      closeHarnessPosition(pos.symbol, pos.exchange, pnl);
+      ctx.broadcast('trade', {
+        symbol: pos.symbol,
+        exchange: pos.exchange,
+        side: pos.side === 'long' ? 'sell' : 'buy',
+        quantity: pos.size,
+        price: pos.currentPrice,
+        realizedPnL: pnl,
+        closed: true,
+      });
+      ctx.broadcast('positions', { positions: getOpenPositions() });
+      return {
+        action: 'position.close',
+        reply: `Closed ${pos.symbol} on ${pos.exchange} — realized P&L $${pnl.toFixed(2)}`,
+        data: { symbol: pos.symbol, exchange: pos.exchange, pnl },
+      };
+    },
+  },
+
+  // REDUCE POSITION — dashboard Reduce button: "reduce position SOL on crypto by 50%"
+  {
+    name: 'position.reduce',
+    help: 'reduce position <SYMBOL> on <EXCHANGE> by <N>% — trim a position',
+    pattern: /^\s*reduce\s+position\s+([A-Za-z0-9/._-]+)\s+on\s+([A-Za-z][A-Za-z0-9_-]*)\s+by\s+(\d+(?:\.\d+)?)\s*%/i,
+    handler: (match, _c, ctx) => {
+      const symbol = match[1].toUpperCase();
+      const exchange = match[2].toLowerCase();
+      const pct = Math.min(100, Math.max(1, parseFloat(match[3]))) / 100;
+      const pos = getOpenPositions().find(
+        (p) => p.symbol.toUpperCase() === symbol && p.exchange.toLowerCase() === exchange
+      );
+      if (!pos) {
+        return { action: 'position.reduce.miss', reply: `No open ${symbol} position on ${exchange}.` };
+      }
+      const direction = pos.side === 'long' || pos.side === 'yes' ? 1 : -1;
+      const closedSize = pos.size * pct;
+      const remainingSize = pos.size - closedSize;
+      const realizedPnL = (pos.currentPrice - pos.avgPrice) * closedSize * direction;
+
+      // Close full, re-open with remaining — harness API only supports full close.
+      closeHarnessPosition(pos.symbol, pos.exchange, realizedPnL);
+      if (remainingSize > 0) {
+        recordPosition({
+          exchange: pos.exchange,
+          symbol: pos.symbol,
+          side: pos.side,
+          size: remainingSize,
+          avgPrice: pos.avgPrice,
+          currentPrice: pos.currentPrice,
+          pnl: (pos.currentPrice - pos.avgPrice) * remainingSize * direction,
+          pnlPercent: ((pos.currentPrice - pos.avgPrice) / pos.avgPrice) * 100 * direction,
+        });
+      }
+      ctx.broadcast('trade', {
+        symbol: pos.symbol,
+        exchange: pos.exchange,
+        side: pos.side === 'long' ? 'sell' : 'buy',
+        quantity: closedSize,
+        price: pos.currentPrice,
+        realizedPnL,
+        reduced: true,
+      });
+      ctx.broadcast('positions', { positions: getOpenPositions() });
+      return {
+        action: 'position.reduce',
+        reply: `Reduced ${pos.symbol} by ${(pct * 100).toFixed(0)}% (${closedSize.toFixed(4)} units) — realized $${realizedPnL.toFixed(2)}, ${remainingSize.toFixed(4)} remaining`,
+        data: { symbol: pos.symbol, exchange: pos.exchange, closedSize, remainingSize, realizedPnL },
+      };
+    },
+  },
+
+  // ADD TO POSITION — dashboard Add button: "add to position SOL on crypto"
+  {
+    name: 'position.add',
+    help: 'add to position <SYMBOL> on <EXCHANGE> — increase size',
+    pattern: /^\s*add\s+to\s+position\s+([A-Za-z0-9/._-]+)\s+on\s+([A-Za-z][A-Za-z0-9_-]*)/i,
+    handler: (match, _c, ctx) => {
+      const symbol = match[1].toUpperCase();
+      const exchange = match[2].toLowerCase();
+      const pos = getOpenPositions().find(
+        (p) => p.symbol.toUpperCase() === symbol && p.exchange.toLowerCase() === exchange
+      );
+      if (!pos) {
+        return { action: 'position.add.miss', reply: `No open ${symbol} position on ${exchange} to add to.` };
+      }
+      const addSize = Math.max(1, Math.round(pos.size * 0.5));
+      const fillPrice = pos.currentPrice || pos.avgPrice;
+      const newSize = pos.size + addSize;
+      const newAvg = (pos.avgPrice * pos.size + fillPrice * addSize) / newSize;
+      const direction = pos.side === 'long' || pos.side === 'yes' ? 1 : -1;
+
+      closeHarnessPosition(pos.symbol, pos.exchange, 0);
+      recordPosition({
+        exchange: pos.exchange,
+        symbol: pos.symbol,
+        side: pos.side,
+        size: newSize,
+        avgPrice: newAvg,
+        currentPrice: fillPrice,
+        pnl: (fillPrice - newAvg) * newSize * direction,
+        pnlPercent: ((fillPrice - newAvg) / newAvg) * 100 * direction,
+      });
+      ctx.broadcast('trade', {
+        symbol: pos.symbol,
+        exchange: pos.exchange,
+        side: pos.side === 'long' ? 'buy' : 'sell',
+        quantity: addSize,
+        price: fillPrice,
+        added: true,
+      });
+      ctx.broadcast('positions', { positions: getOpenPositions() });
+      return {
+        action: 'position.add',
+        reply: `Added ${addSize} to ${pos.symbol} @ $${fillPrice.toFixed(2)} — now ${newSize} @ avg $${newAvg.toFixed(2)}`,
+        data: { symbol: pos.symbol, exchange: pos.exchange, addSize, newSize, newAvg },
+      };
     },
   },
 
