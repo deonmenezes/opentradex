@@ -177,8 +177,17 @@ export default memo(function LeftSidebar({ positions, trades, markets, onClose, 
             );
           })}
           {positions.length === 0 && (
-            <div className="px-4 py-8 text-center text-text-dim text-sm">
-              No open positions
+            <div
+              data-testid="empty-positions"
+              className="px-4 py-8 flex flex-col items-center gap-2 text-center"
+            >
+              <svg className="w-8 h-8 text-text-dim/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <div className="text-sm font-medium text-text">No open positions</div>
+              <div className="text-2xs text-text-dim max-w-[12rem] leading-relaxed">
+                Try <code className="px-1 py-0.5 bg-surface-2 rounded text-accent">scan markets</code> in the chat to find an opportunity.
+              </div>
             </div>
           )}
         </div>
@@ -302,8 +311,17 @@ export default memo(function LeftSidebar({ positions, trades, markets, onClose, 
             );
           })}
           {markets.length === 0 && (
-            <div className="px-4 py-8 text-center text-text-dim text-sm">
-              No markets found
+            <div
+              data-testid="empty-scanner"
+              className="px-4 py-8 flex flex-col items-center gap-2 text-center"
+            >
+              <svg className="w-8 h-8 text-text-dim/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <div className="text-sm font-medium text-text">Scanner idle</div>
+              <div className="text-2xs text-text-dim max-w-[13rem] leading-relaxed">
+                Hit the <span className="text-accent">⚡ Cross-Market Scan</span> mission to discover live opportunities.
+              </div>
             </div>
           )}
         </div>

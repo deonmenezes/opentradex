@@ -1,8 +1,9 @@
 import { useState, useEffect, memo } from 'react';
-import type { HarnessStatus } from '../lib/types';
+import type { HarnessStatus, WsMeta } from '../lib/types';
 
 interface TopBarProps {
   status: HarnessStatus;
+  wsMeta?: WsMeta;
   onRunCycle?: () => void;
   onToggleAutoLoop?: () => void;
   onSetLoopInterval?: (minutes: number) => void;
@@ -11,11 +12,13 @@ interface TopBarProps {
   onShowTrades?: () => void;
   onShowMarkets?: () => void;
   onShowPayments?: () => void;
+  onOpenSetup?: () => void;
 }
 
 // Memoized TopBar to prevent unnecessary re-renders
 export default memo(function TopBar({
   status,
+  wsMeta,
   onRunCycle,
   onToggleAutoLoop,
   onSetLoopInterval,
@@ -23,7 +26,8 @@ export default memo(function TopBar({
   onToggleRightSidebar,
   onShowTrades,
   onShowMarkets,
-  onShowPayments
+  onShowPayments,
+  onOpenSetup
 }: TopBarProps) {
   const [loopMenuOpen, setLoopMenuOpen] = useState(false);
   const loopIntervals = [1, 2, 5, 10, 15, 30];
@@ -96,16 +100,52 @@ export default memo(function TopBar({
           <span className="font-bold text-text hidden sm:block">OPENTRADEX</span>
         </div>
 
-        {/* Connection Status - Hidden on mobile */}
-        <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-surface-2">
-          <div className={`w-2 h-2 rounded-full ${status.connection === 'connected' ? 'bg-accent shadow-sm shadow-accent' : 'bg-danger'}`} />
-          <span className="text-xs text-text-dim capitalize">{status.connection === 'connected' ? 'Live' : status.connection}</span>
-        </div>
+        {/* Connection Status - three-state dot (green/yellow/red) with tooltip */}
+        {(() => {
+          const conn = status.connection;
+          const dotColor =
+            conn === 'connected' ? 'bg-accent shadow-sm shadow-accent' :
+            conn === 'reconnecting' || conn === 'connecting' ? 'bg-warning animate-pulse' :
+            'bg-danger';
+          const label =
+            conn === 'connected' ? 'Live' :
+            conn === 'reconnecting' ? 'Reconnecting' :
+            conn === 'connecting' ? 'Connecting' :
+            'Offline';
+          const latencyStr =
+            wsMeta && typeof wsMeta.latencyMs === 'number' && wsMeta.latencyMs >= 0
+              ? `${wsMeta.latencyMs}ms`
+              : '—';
+          const attemptsStr = wsMeta ? wsMeta.attempts : 0;
+          const tooltip = `Gateway: ${label}\nLatency: ${latencyStr}\nReconnect attempts: ${attemptsStr}`;
+          return (
+            <div
+              title={tooltip}
+              data-testid="connection-badge"
+              data-connection={conn}
+              className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-surface-2"
+            >
+              <div className={`w-2 h-2 rounded-full ${dotColor}`} />
+              <span className="text-xs text-text-dim">{label}</span>
+              {wsMeta && wsMeta.latencyMs >= 0 && conn === 'connected' && (
+                <span className="text-2xs text-text-dim/70 tabular-nums">{latencyStr}</span>
+              )}
+            </div>
+          );
+        })()}
 
-        {/* Trading Mode */}
-        <div className={`hidden sm:flex items-center gap-1.5 px-2 md:px-3 py-1 rounded-lg text-xs md:text-sm font-semibold ${modeColors[status.mode]}`}>
+        {/* Trading Mode — click opens the setup wizard so the user can switch mode + provider */}
+        <button
+          onClick={onOpenSetup}
+          title="Click to change mode / set up an AI provider"
+          className={`hidden sm:flex items-center gap-1.5 px-2 md:px-3 py-1 rounded-lg text-xs md:text-sm font-semibold transition-opacity hover:opacity-80 ${modeColors[status.mode]}`}
+        >
           {modeLabels[status.mode]}
-        </div>
+          <svg className="w-3 h-3 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
       </div>
 
       {/* Center: Capital & P&L — compact, inline */}

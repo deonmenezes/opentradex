@@ -6,11 +6,17 @@ import type {
   Market,
   FeedItem,
   Message,
+  WsMeta,
 } from '../lib/types';
 
 const API_BASE = '/api';
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 const POLL_INTERVAL_MS = 5000;
+// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (cap). Reset on successful open.
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_CAP_MS = 30_000;
+const RECONNECT_BANNER_MS = 2000;
+const PING_INTERVAL_MS = 15_000;
 
 function formatVolume(n: number): string {
   if (!Number.isFinite(n) || n === 0) return '0';
@@ -51,98 +57,48 @@ function toMarket(m: GatewayMarket): Market {
   };
 }
 
-// Mock data for demo
-const mockStatus: HarnessStatus = {
+// Initial empty state — real data streams in from the gateway.
+// No mock values: if the gateway is unreachable, the UI shows zeros + empty lists,
+// which is the honest state rather than a fake portfolio.
+const initialStatus: HarnessStatus = {
   mode: 'paper-only',
-  connection: 'connected',
+  connection: 'connecting',
   rails: {
-    kalshi: true,
-    polymarket: true,
+    kalshi: false,
+    polymarket: false,
     alpaca: false,
-    tradingview: true,
-    crypto: true,
+    tradingview: false,
+    crypto: false,
   },
-  capital: 15237.74,
-  dayPnL: 184.27,
-  dayPnLPercent: 1.22,
-  trades: 4,
-  winRate: 50,
-  openPositions: 2,
-  cycles: 2,
+  capital: 0,
+  dayPnL: 0,
+  dayPnLPercent: 0,
+  trades: 0,
+  winRate: 0,
+  openPositions: 0,
+  cycles: 0,
   isAutoLoop: false,
   cycleInterval: 15,
 };
 
-const mockPositions: Position[] = [
-  {
-    id: '1',
-    exchange: 'kalshi',
-    symbol: 'FED-SEP-CUT',
-    title: 'Will the Fed cut rates by September?',
-    side: 'yes',
-    size: 18,
-    avgPrice: 0.41,
-    currentPrice: 0.56,
-    pnl: 2.70,
-    pnlPercent: 36.6,
-    confidence: 'High',
-  },
-  {
-    id: '2',
-    exchange: 'kalshi',
-    symbol: 'BTC-EOY-120K',
-    title: 'Will Bitcoin finish the year above 120k?',
-    side: 'yes',
-    size: 24,
-    avgPrice: 0.36,
-    currentPrice: 0.49,
-    pnl: 3.12,
-    pnlPercent: 36.1,
-    confidence: 'Medium',
-  },
-];
-
-const mockTrades: Trade[] = [
-  { id: '1', exchange: 'kalshi', symbol: 'FED-SEP-CUT', side: 'yes', size: 18, price: 0.41, status: 'open', timestamp: Date.now() - 18 * 60000, age: '18m' },
-  { id: '2', exchange: 'kalshi', symbol: 'BTC-EOY-120K', side: 'yes', size: 24, price: 0.36, status: 'open', timestamp: Date.now() - 42 * 60000, age: '42m' },
-  { id: '3', exchange: 'kalshi', symbol: 'OIL-Q3-90', side: 'yes', size: 15, price: 0.33, pnl: 71.00, status: 'closed', timestamp: Date.now() - 3600000, age: '1h' },
-  { id: '4', exchange: 'polymarket', symbol: 'GDP-NEXT-LOWER', side: 'no', size: 30, price: 0.52, pnl: -24.00, status: 'closed', timestamp: Date.now() - 7200000, age: '2h' },
-];
-
-const mockMarkets: Market[] = [
-  { id: '1', exchange: 'kalshi', symbol: 'FED-SEP-CUT', title: 'Will the Fed cut rates by Sept...', bidAsk: '42/44', mid: 43, volume: '1.2M' },
-  { id: '2', exchange: 'kalshi', symbol: 'BTC-EOY-120K', title: 'Will Bitcoin finish the year above...', bidAsk: '37/39', mid: 38, volume: '920.0K' },
-  { id: '3', exchange: 'kalshi', symbol: 'OIL-Q3-90', title: 'Will WTI crude trade above 90 be...', bidAsk: '33/35', mid: 34, volume: '610.0K' },
-  { id: '4', exchange: 'polymarket', symbol: 'JOBS-NEXT-STRONG', title: 'Will jobs report beat expectations...', bidAsk: '48/50', mid: 49, volume: '420.0K' },
-];
-
-const mockFeed: FeedItem[] = [
-  { id: '1', source: 'reuters', category: 'macro', title: 'Rates markets lean toward an earlier cut as Treasury yields cool', summary: 'Bond traders pushed yields lower after softer macro data nudged expectations for the first cut into September.', timestamp: Date.now() - 14 * 60000, age: '14m', tickers: ['TLT', 'ZN'] },
-  { id: '2', source: 'bloomberg', category: 'crypto', title: 'Bitcoin demand firms as ETF flows recover and volatility settles', summary: 'IBIT and FBTC saw $312M of combined net inflows yesterday, the strongest day in three weeks.', timestamp: Date.now() - 28 * 60000, age: '28m', tickers: ['BTC', 'IBIT'] },
-  { id: '3', source: 'ft', category: 'commodities', title: 'Crude risk premium rises as traders assess fresh supply concerns', timestamp: Date.now() - 45 * 60000, age: '45m', tickers: ['CL', 'USO'] },
-  { id: '4', source: 'cnbc', category: 'equities', title: 'Nvidia leads chip rally as hyperscaler capex guidance surprises to the upside', summary: 'Microsoft and Meta both lifted FY26 capex targets, pointing to sustained AI infrastructure demand.', timestamp: Date.now() - 33 * 60000, age: '33m', tickers: ['NVDA', 'MSFT', 'META'] },
-  { id: '5', source: 'wsj', category: 'macro', title: 'Fed staff memo flags cooling labor market, tees up September pivot debate', timestamp: Date.now() - 48 * 60000, age: '48m', tickers: ['SPY', 'TLT'] },
-  { id: '6', source: 'marketwatch', category: 'equities', title: 'SPX closes at fresh high as breadth finally catches up to the mega-caps', timestamp: Date.now() - 55 * 60000, age: '55m', tickers: ['SPY', 'RSP'] },
-  { id: '7', source: 'coindesk', category: 'crypto', title: 'Ether options skew flips bullish ahead of the Pectra upgrade', timestamp: Date.now() - 62 * 60000, age: '1h', tickers: ['ETH'] },
-  { id: '8', source: 'theblock', category: 'crypto', title: 'Polymarket volume crosses $1.1B on US election week contracts', timestamp: Date.now() - 72 * 60000, age: '1h', tickers: ['POLY'] },
-  { id: '9', source: 'benzinga', category: 'equities', title: 'Unusual options flow: $18M of SPY Nov 600c hit the tape before the close', timestamp: Date.now() - 82 * 60000, age: '1h', tickers: ['SPY'] },
-  { id: '10', source: 'seekingalpha', category: 'forex', title: 'DXY slides to fresh 6-month low as carry trades unwind into BoJ meeting', timestamp: Date.now() - 95 * 60000, age: '2h', tickers: ['DXY', 'USDJPY'] },
-  { id: '11', source: 'x', category: 'social', title: '@zerohedge: Fed pivot incoming? Market pricing now shows 73% chance of September cut', timestamp: Date.now() - 52 * 60000, age: '52m' },
-  { id: '12', source: 'reddit', category: 'social', title: 'r/wallstreetbets: Massive call flow on SPY 550c expiring Friday', timestamp: Date.now() - 67 * 60000, age: '1h' },
-];
-
 export function useHarness() {
-  const [status, setStatus] = useState<HarnessStatus>(mockStatus);
-  const [positions, setPositions] = useState<Position[]>(mockPositions);
-  const [trades, setTrades] = useState<Trade[]>(mockTrades);
-  const [markets, setMarkets] = useState<Market[]>(mockMarkets);
-  const [feed, setFeed] = useState<FeedItem[]>(mockFeed);
+  const [status, setStatus] = useState<HarnessStatus>(initialStatus);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [markets, setMarkets] = useState<Market[]>([]);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [connectionType, setConnectionType] = useState<'ws' | 'sse' | 'none'>('none');
+  const [wsMeta, setWsMeta] = useState<WsMeta>({ attempts: 0, latencyMs: -1, reconnectedAt: 0 });
   const wsRef = useRef<WebSocket | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const everConnectedRef = useRef(false);
+  const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastPingAtRef = useRef(0);
   const loopTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectFnRef = useRef<() => void>(() => {});
 
   // Handle real-time message
   const handleRealtimeMessage = useCallback((data: { type: string; payload: unknown }) => {
@@ -207,19 +163,47 @@ export function useHarness() {
       }
     }
 
-    // Pull live data from the gateway (real markets, real risk state)
+    // Pull live data from the gateway (real scraped markets, real risk state, live news)
     async function pollLive() {
       if (!mounted) return;
       try {
-        const [scanRes, riskRes] = await Promise.all([
+        const [scanRes, riskRes, scraperRes] = await Promise.all([
           fetch(`${API_BASE}/scan?limit=50`).catch(() => null),
           fetch(`${API_BASE}/risk`).catch(() => null),
+          fetch(`${API_BASE}/scraper/snapshot`).catch(() => null),
         ]);
 
         if (scanRes?.ok && mounted) {
           const data = await scanRes.json();
           const live = Array.isArray(data?.markets) ? (data.markets as GatewayMarket[]).map(toMarket) : [];
           if (live.length > 0) setMarkets(live);
+        }
+
+        // Hydrate dashboard with live scraped data (news feed, exchange events)
+        if (scraperRes?.ok && mounted) {
+          try {
+            const scraperData = await scraperRes.json();
+            // Push scraped news into the feed
+            if (Array.isArray(scraperData?.news) && scraperData.news.length > 0) {
+              const scrapedFeed = (scraperData.news as Array<{
+                id: string; title: string; summary?: string; source: string;
+                url: string; age: string; category: string; tickers?: string[];
+                sentiment?: string;
+              }>).map((n): FeedItem => ({
+                id: n.id,
+                title: n.title,
+                summary: n.summary,
+                source: n.source as FeedItem['source'],
+                url: n.url,
+                age: n.age,
+                timestamp: Date.now(),
+                category: n.category as FeedItem['category'],
+                tickers: n.tickers,
+                sentiment: n.sentiment as FeedItem['sentiment'],
+              }));
+              setFeed(scrapedFeed);
+            }
+          } catch { /* ignore parse errors */ }
         }
 
         if (riskRes?.ok && mounted) {
@@ -242,18 +226,57 @@ export function useHarness() {
                 }))
               : [];
             setPositions(livePositions);
-            setStatus((prev) => ({
-              ...prev,
-              dayPnL: Number(state.dailyPnL ?? 0),
-              dayPnLPercent: prev.capital > 0 ? (Number(state.dailyPnL ?? 0) / prev.capital) * 100 : 0,
-              trades: Number(state.dailyTrades ?? 0),
-              openPositions: livePositions.length,
-            }));
+            setStatus((prev) => {
+              const capital = Number(state.equity ?? state.startingCapital ?? 0);
+              const dayPnL = Number(state.dailyPnL ?? 0);
+              return {
+                ...prev,
+                capital,
+                dayPnL,
+                dayPnLPercent: capital > 0 ? (dayPnL / capital) * 100 : 0,
+                trades: Number(state.dailyTrades ?? 0),
+                winRate: Number(state.winRate ?? 0),
+                openPositions: livePositions.length,
+              };
+            });
           }
         }
       } catch {
         /* swallow — next tick will retry */
       }
+    }
+
+    function startPingLoop(ws: WebSocket) {
+      if (pingTimerRef.current) clearInterval(pingTimerRef.current);
+      pingTimerRef.current = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        try {
+          lastPingAtRef.current = Date.now();
+          ws.send(JSON.stringify({ type: 'ping', t: lastPingAtRef.current }));
+        } catch {
+          // next tick will retry; server heartbeat will evict if we stay silent
+        }
+      }, PING_INTERVAL_MS);
+    }
+
+    function stopPingLoop() {
+      if (pingTimerRef.current) {
+        clearInterval(pingTimerRef.current);
+        pingTimerRef.current = null;
+      }
+    }
+
+    function scheduleReconnect() {
+      if (!mounted) return;
+      const attempt = reconnectAttemptsRef.current;
+      // 1s, 2s, 4s, 8s, 16s, 30s (cap)
+      const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_CAP_MS);
+      reconnectAttemptsRef.current = attempt + 1;
+      setWsMeta((m) => ({ ...m, attempts: reconnectAttemptsRef.current }));
+      setStatus((prev) => ({ ...prev, connection: 'reconnecting' }));
+
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
     }
 
     function connectWebSocket() {
@@ -264,21 +287,47 @@ export function useHarness() {
         wsRef.current = ws;
 
         ws.onopen = () => {
-          if (mounted) {
-            console.log('[WS] Connected');
-            setConnectionType('ws');
-            setStatus((prev) => ({ ...prev, connection: 'connected' }));
-            // If SSE fallback is open, close it now that WS is live
-            if (eventSourceRef.current) {
-              eventSourceRef.current.close();
-              eventSourceRef.current = null;
-            }
+          if (!mounted) return;
+          console.log('[WS] Connected');
+          const wasPreviouslyConnected = everConnectedRef.current;
+          everConnectedRef.current = true;
+          reconnectAttemptsRef.current = 0;
+
+          setConnectionType('ws');
+          setStatus((prev) => ({ ...prev, connection: 'connected' }));
+          setWsMeta((m) => ({
+            ...m,
+            attempts: 0,
+            reconnectedAt: wasPreviouslyConnected ? Date.now() : m.reconnectedAt,
+          }));
+
+          // Auto-clear the reconnected banner after 2s
+          if (wasPreviouslyConnected) {
+            setTimeout(() => {
+              setWsMeta((m) =>
+                m.reconnectedAt && Date.now() - m.reconnectedAt >= RECONNECT_BANNER_MS
+                  ? { ...m, reconnectedAt: 0 }
+                  : m
+              );
+            }, RECONNECT_BANNER_MS + 50);
           }
+
+          // Close SSE fallback (re-subscribe exclusively to WS)
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+          }
+          startPingLoop(ws);
         };
 
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            if (data?.type === 'pong' && typeof data.timestamp === 'number' && lastPingAtRef.current > 0) {
+              const latency = Date.now() - lastPingAtRef.current;
+              setWsMeta((m) => ({ ...m, latencyMs: latency }));
+              return;
+            }
             handleRealtimeMessage(data);
           } catch {
             // Ignore invalid JSON
@@ -287,21 +336,20 @@ export function useHarness() {
 
         ws.onerror = () => {
           console.log('[WS] Error, falling back to SSE');
-          ws.close();
+          try { ws.close(); } catch { /* already closing */ }
         };
 
         ws.onclose = () => {
-          if (mounted) {
-            wsRef.current = null;
-            // Fall back to SSE
-            connectSSE();
-            // Try to reconnect WebSocket after delay
-            reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-          }
+          if (!mounted) return;
+          wsRef.current = null;
+          stopPingLoop();
+          // Fall back to SSE so the feed doesn't go silent while WS recovers
+          connectSSE();
+          scheduleReconnect();
         };
       } catch {
-        // WebSocket not available, use SSE
         connectSSE();
+        scheduleReconnect();
       }
     }
 
@@ -342,6 +390,19 @@ export function useHarness() {
       }
     }
 
+    reconnectFnRef.current = () => {
+      if (!mounted) return;
+      reconnectAttemptsRef.current = 0;
+      setWsMeta((m) => ({ ...m, attempts: 0 }));
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      try { wsRef.current?.close(); } catch { /* ignore */ }
+      wsRef.current = null;
+      connectWebSocket();
+    };
+
     fetchData();
     connectWebSocket();
     pollLive();
@@ -351,6 +412,10 @@ export function useHarness() {
       mounted = false;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (pingTimerRef.current) {
+        clearInterval(pingTimerRef.current);
+        pingTimerRef.current = null;
       }
       if (pollTimer) clearInterval(pollTimer);
       wsRef.current?.close();
@@ -460,6 +525,11 @@ export function useHarness() {
     setStatus((prev) => ({ ...prev, isAutoLoop: false }));
   }, []);
 
+  // Force an immediate reconnect attempt (resets backoff counter).
+  const reconnect = useCallback(() => {
+    reconnectFnRef.current();
+  }, []);
+
   return {
     status,
     positions,
@@ -467,10 +537,13 @@ export function useHarness() {
     markets,
     feed,
     messages,
+    wsMeta,
+    connectionType,
     sendCommand,
     toggleAutoLoop,
     setLoopInterval,
     runCycle,
     panic,
+    reconnect,
   };
 }

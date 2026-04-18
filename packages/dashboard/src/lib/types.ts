@@ -1,7 +1,16 @@
 /** Dashboard types */
 
 export type TradingMode = 'paper-only' | 'paper-default' | 'live-allowed';
-export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting';
+export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'reconnecting';
+
+export interface WsMeta {
+  /** Number of consecutive failed WS connect attempts (resets to 0 on open) */
+  attempts: number;
+  /** Last measured round-trip latency in ms (-1 if not measured yet) */
+  latencyMs: number;
+  /** Timestamp of the most recent successful reconnection (0 if never); used to show a banner */
+  reconnectedAt: number;
+}
 
 export interface HarnessStatus {
   mode: TradingMode;

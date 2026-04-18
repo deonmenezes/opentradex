@@ -233,11 +233,17 @@ export default memo(function RightSidebar({ feed, onClose, onFeedAction }: Right
         })}
 
         {filteredFeed.length === 0 && (
-          <div className="px-4 py-12 text-center">
-            <svg className="w-12 h-12 mx-auto text-text-dim/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+          <div
+            data-testid="empty-feed"
+            className="px-4 py-12 text-center flex flex-col items-center gap-2"
+          >
+            <svg className="w-10 h-10 text-text-dim/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
             </svg>
-            <p className="text-sm text-text-dim">No items in this feed</p>
+            <p className="text-sm font-medium text-text">Waiting for news</p>
+            <p className="text-2xs text-text-dim max-w-[15rem] leading-relaxed">
+              Stories flow in from your configured feeds. Add sources in the scraper config to populate this panel.
+            </p>
           </div>
         )}
       </div>
