@@ -3,6 +3,10 @@
  * Inspired by oh-my-openagent: no lock-in, orchestrate any model.
  */
 
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { loadConfig } from '../config.js';
 import { getRiskState } from '../risk.js';
 import type { AIProvider, AIMessage, ChatOptions, TaskRole } from './providers/types.js';
@@ -13,6 +17,11 @@ import {
   resolveProvider,
   resolveProviderForRole,
 } from './providers/registry.js';
+import { hydrateAIKeysFromDisk } from './ai-keys.js';
+
+// Load any keys the user saved via the setup wizard into process.env
+// before the first isConfigured() check runs.
+hydrateAIKeysFromDisk();
 
 export interface AIConfig {
   apiKey?: string;
@@ -37,21 +46,46 @@ export interface ChatCallOptions {
   maxTokens?: number;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are OpenTradex AI, an intelligent trading assistant integrated into a multi-exchange trading harness.
+const PERSONA_FILES = ['soul.md', 'agents.md', 'skills.md', 'cron.md'] as const;
 
-Your capabilities:
-- Analyze market data across multiple exchanges (Kalshi, Polymarket, Alpaca, crypto exchanges)
-- Provide trading recommendations with clear reasoning
-- Assess risk and suggest position sizing
-- Explain market dynamics and correlations
-- Help users understand their portfolio and positions
+function loadPersona(): string {
+  const overrideDir = join(homedir(), '.opentradex', 'persona');
+  const bundledDir = join(dirname(fileURLToPath(import.meta.url)), 'persona');
+  const parts: string[] = [];
+  for (const file of PERSONA_FILES) {
+    const override = join(overrideDir, file);
+    const bundled = join(bundledDir, file);
+    const chosen = existsSync(override) ? override : bundled;
+    if (existsSync(chosen)) {
+      try {
+        parts.push(`\n\n===== ${file.toUpperCase()} =====\n\n${readFileSync(chosen, 'utf8').trim()}`);
+      } catch {
+        // skip unreadable file
+      }
+    }
+  }
+  return parts.join('\n');
+}
 
-Guidelines:
-- Always consider risk management first
-- Be clear about uncertainty — markets are unpredictable
-- Provide actionable insights, not just analysis
-- When suggesting trades, include entry, target, and stop-loss levels
-- Respect the user's trading mode (paper vs live)`;
+const GREETING_RULE = `
+## First-message behavior
+
+If the user's first message is a greeting ("hi", "hey", "hello", "sup", "yo", or empty) AND there is no prior conversation history, respond with exactly one friendly opener that:
+1. Introduces yourself in one line.
+2. Asks: **"What markets do you want to trade — prediction markets (Kalshi/Polymarket), stocks (Alpaca), or crypto?"**
+3. Does not dump capabilities, menus, or long explanations.
+
+Keep it under 40 words. Warm and interactive, not corporate.
+
+Example good greeting:
+"Hey — I'm OpenTradex, your trading copilot. What markets are we looking at today: prediction markets (Kalshi / Polymarket), stocks (Alpaca), or crypto?"
+`;
+
+const DEFAULT_SYSTEM_PROMPT = `You are **OpenTradex**, a conversational trading copilot.
+${loadPersona()}
+
+${GREETING_RULE}
+`;
 
 class OpenTradexAI {
   private config: AIConfig;

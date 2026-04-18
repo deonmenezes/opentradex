@@ -4,6 +4,9 @@ import { OpenAICompatibleProvider } from './openai-compatible.js';
 import { GoogleProvider } from './google.js';
 import { ClaudeCLIProvider } from './claude-cli.js';
 import { OpenCodeCLIProvider } from './opencode-cli.js';
+import { GeminiCLIProvider } from './gemini-cli.js';
+import { OllamaProvider } from './ollama.js';
+import { detectBinary } from './detect.js';
 
 /**
  * Built-in provider registry. Add a new backend by adding one line here —
@@ -24,7 +27,37 @@ const PROVIDERS: AIProvider[] = [
   new GoogleProvider(),
   new ClaudeCLIProvider(),
   new OpenCodeCLIProvider(),
+  new GeminiCLIProvider(),
+  new OllamaProvider(),
 ];
+
+/**
+ * Public list of CLI providers the one-click setup flow probes for. Extend
+ * this list (plus a new provider class above) to surface a new zero-config
+ * tool in the setup wizard.
+ */
+export interface CLIDetection {
+  provider: string;       // provider name as registered above
+  binary: string;         // short name probed on PATH (e.g. "claude")
+  path: string | null;    // absolute path when found, else null
+  available: boolean;     // shorthand: path !== null
+  label: string;          // human-readable tile title
+  description: string;    // short tagline for the tile
+  requiresApiKey: boolean; // CLIs self-auth, so always false today
+}
+
+export function detectCLIs(): CLIDetection[] {
+  const probes: Array<Omit<CLIDetection, 'path' | 'available'>> = [
+    { provider: 'claude-cli',   binary: 'claude',   label: 'Claude Code CLI', description: 'Anthropic CLI — uses your existing Claude subscription or API login', requiresApiKey: false },
+    { provider: 'opencode-cli', binary: 'opencode', label: 'OpenCode CLI',    description: 'sst/opencode — orchestrates whatever model you have configured', requiresApiKey: false },
+    { provider: 'gemini-cli',   binary: 'gemini',   label: 'Gemini CLI',      description: 'Google Gemini CLI — uses `gemini auth login`',                     requiresApiKey: false },
+    { provider: 'ollama',       binary: 'ollama',   label: 'Ollama',          description: 'Local LLM runtime — runs models on your machine, free',            requiresApiKey: false },
+  ];
+  return probes.map((p) => {
+    const path = detectBinary(p.binary);
+    return { ...p, path, available: path !== null };
+  });
+}
 
 /**
  * Role → ordered provider preferences. First configured provider wins.
