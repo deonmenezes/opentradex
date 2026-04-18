@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build & sign ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: macos-latest
+            target: mac
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install desktop dependencies
+        working-directory: packages/desktop
+        run: npm ci --no-audit --no-fund
+
+      - name: Build harness
+        run: npm run build
+
+      - name: Build dashboard
+        run: npm run build:dashboard
+
+      - name: Build desktop (${{ matrix.target }})
+        working-directory: packages/desktop
+        env:
+          # Windows Authenticode signing (electron-builder auto-reads CSC_LINK / CSC_KEY_PASSWORD)
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # macOS Developer ID signing + notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Publish to GitHub Releases via electron-builder
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --${{ matrix.target }} --publish always
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentradex-${{ matrix.target }}
+          path: |
+            packages/desktop/release/*.exe
+            packages/desktop/release/*.msi
+            packages/desktop/release/*.appx
+            packages/desktop/release/*.dmg
+            packages/desktop/release/*.pkg
+            packages/desktop/release/*.zip
+            packages/desktop/release/latest*.yml
+          if-no-files-found: ignore

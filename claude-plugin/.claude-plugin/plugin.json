@@ -1,0 +1,22 @@
+{
+  "name": "opentradex",
+  "description": "Talk to your local OpenTradex trading gateway from Claude Code. Scan markets, check risk, show positions, and run trading commands against the paper-first harness on port 3210.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Deon Menezes",
+    "email": "deonmenezescodes@gmail.com"
+  },
+  "homepage": "https://github.com/deonmenezes/opentradex",
+  "repository": "https://github.com/deonmenezes/opentradex",
+  "license": "MIT",
+  "keywords": [
+    "trading",
+    "kalshi",
+    "polymarket",
+    "alpaca",
+    "crypto",
+    "prediction-markets",
+    "paper-trading",
+    "opentradex"
+  ]
+}
