@@ -4,6 +4,18 @@
 
 import { EventEmitter } from 'events';
 import { ScanResult } from './scanner.js';
+import { recordPosition, closePosition as closeRiskPosition, getOpenPositions as getRiskPositions } from '../risk.js';
+import type { Exchange, Side } from '../types.js';
+
+function mapExchange(raw: string): Exchange {
+  const s = raw.toLowerCase();
+  if (s === 'kalshi') return 'kalshi';
+  if (s === 'polymarket') return 'polymarket';
+  if (s === 'alpaca') return 'alpaca';
+  if (s === 'crypto') return 'crypto';
+  // stocks, commodities, tradingview → tradingview
+  return 'tradingview';
+}
 
 export interface TradeResult {
   success: boolean;
@@ -25,6 +37,7 @@ interface Order {
   quantity: number;
   type: 'market' | 'limit';
   price?: number;
+  exchange?: string;
   status: 'pending' | 'filled' | 'cancelled' | 'rejected';
   filledPrice?: number;
   filledAt?: Date;
@@ -59,6 +72,7 @@ export class TradeExecutor extends EventEmitter {
       quantity,
       type: 'market',
       price: opportunity.price,
+      exchange: opportunity.exchange,
     });
   }
 
@@ -68,6 +82,7 @@ export class TradeExecutor extends EventEmitter {
     quantity: number;
     type?: 'market' | 'limit';
     price?: number;
+    exchange?: string;
   }): Promise<TradeResult> {
     const orderId = `ORD-${++this.orderIdCounter}-${Date.now()}`;
 
@@ -79,6 +94,7 @@ export class TradeExecutor extends EventEmitter {
       quantity: params.quantity,
       type: params.type || 'market',
       price: params.price,
+      exchange: params.exchange,
       status: 'pending',
     };
 
@@ -119,8 +135,9 @@ export class TradeExecutor extends EventEmitter {
     order.filledPrice = filledPrice;
     order.filledAt = new Date();
 
-    // Update positions
+    // Update positions (local + shared harness ledger)
     this.updatePosition(order.symbol, order.side, order.quantity, filledPrice);
+    this.syncToHarness(order, filledPrice);
 
     const result: TradeResult = {
       success: true,
@@ -182,6 +199,40 @@ export class TradeExecutor extends EventEmitter {
         existing.quantity -= quantity;
       }
     }
+  }
+
+  private syncToHarness(order: Order, filledPrice: number): void {
+    const exchange = mapExchange(order.exchange || 'tradingview');
+    const harnessSide: Side = order.side === 'buy' ? 'long' : 'short';
+    const existing = getRiskPositions().find((p) => p.symbol === order.symbol && p.exchange === exchange);
+
+    if (!existing) {
+      recordPosition({
+        exchange,
+        symbol: order.symbol,
+        side: harnessSide,
+        size: order.quantity,
+        avgPrice: filledPrice,
+        currentPrice: filledPrice,
+        pnl: 0,
+        pnlPercent: 0,
+      });
+      return;
+    }
+
+    // Opposite-side fill → close (or reduce) the existing harness position
+    const isClosingFill =
+      (existing.side === 'long' && order.side === 'sell') ||
+      (existing.side === 'short' && order.side === 'buy');
+
+    if (isClosingFill) {
+      const pnl =
+        existing.side === 'long'
+          ? (filledPrice - existing.avgPrice) * existing.size
+          : (existing.avgPrice - filledPrice) * existing.size;
+      closeRiskPosition(order.symbol, exchange, pnl);
+    }
+    // Same-side adds are left as-is; the existing position's avgPrice update lives in local state.
   }
 
   private calculateQuantity(opportunity: ScanResult): number {
