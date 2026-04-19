@@ -1644,6 +1644,14 @@ POST /api/panic       Emergency stop
       // Clear heartbeat
       clearInterval(wsHeartbeat);
 
+      // Stop the scraper service — it owns price/news/exchange intervals
+      // that otherwise keep the event loop alive and hang test runs.
+      try {
+        getScraperService().stop();
+      } catch {
+        // Scraper may not have started (e.g. test that never hit its endpoints)
+      }
+
       // Close SSE clients
       for (const client of sseClients) {
         client.end();
