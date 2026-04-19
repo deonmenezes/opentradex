@@ -72,21 +72,55 @@ export async function scrapePolymarket(limit = 20): Promise<ScrapedExchangeEvent
 
 // ── Kalshi ──────────────────────────────────────────────────────────
 
+interface KalshiMarket {
+  ticker: string;
+  title: string;
+  status?: string;
+  // New schema (2025+): prices are decimal-dollar strings.
+  yes_bid_dollars?: string;
+  yes_ask_dollars?: string;
+  no_bid_dollars?: string;
+  no_ask_dollars?: string;
+  last_price_dollars?: string;
+  liquidity_dollars?: string;
+  notional_value_dollars?: string;
+  volume_fp?: number | string;
+  volume_24h_fp?: number | string;
+  open_interest_fp?: number | string;
+  // Legacy fallback (cents, integer) — kept in case older endpoints still respond that way.
+  yes_bid?: number;
+  yes_ask?: number;
+  no_bid?: number;
+  no_ask?: number;
+  last_price?: number;
+  volume?: number;
+  close_time?: string;
+}
+
 interface KalshiEvent {
   event_ticker: string;
   title: string;
   category: string;
-  markets: Array<{
-    ticker: string;
-    title: string;
-    yes_bid: number;
-    yes_ask: number;
-    no_bid: number;
-    no_ask: number;
-    volume: number;
-    close_time?: string;
-    last_price: number;
-  }>;
+  markets: KalshiMarket[];
+}
+
+/** Coerce a Kalshi price field to a 0–1 probability. Handles dollar-string, cent-int, or missing. */
+function kalshiPrice(dollars: string | undefined, cents: number | undefined): number {
+  if (dollars != null && dollars !== '') {
+    const n = parseFloat(dollars);
+    if (Number.isFinite(n)) return n;
+  }
+  if (typeof cents === 'number' && Number.isFinite(cents)) return cents / 100;
+  return 0;
+}
+
+function kalshiNumber(...candidates: Array<number | string | undefined>): number {
+  for (const c of candidates) {
+    if (c == null || c === '') continue;
+    const n = typeof c === 'string' ? parseFloat(c) : c;
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
 }
 
 export async function scrapeKalshi(limit = 20): Promise<ScrapedExchangeEvent[]> {
@@ -102,17 +136,34 @@ export async function scrapeKalshi(limit = 20): Promise<ScrapedExchangeEvent[]> 
 
     for (const event of events) {
       for (const market of event.markets) {
-        const yesPrice = (market.yes_bid + market.yes_ask) / 2 / 100;
-        const noPrice = (market.no_bid + market.no_ask) / 2 / 100;
+        const yesBid = kalshiPrice(market.yes_bid_dollars, market.yes_bid);
+        const yesAsk = kalshiPrice(market.yes_ask_dollars, market.yes_ask);
+        const noBid = kalshiPrice(market.no_bid_dollars, market.no_bid);
+        const noAsk = kalshiPrice(market.no_ask_dollars, market.no_ask);
+        const last = kalshiPrice(market.last_price_dollars, market.last_price);
+
+        // Midpoint quotes — fall back to last trade if the book is one-sided or empty.
+        const yesPrice = yesBid && yesAsk ? (yesBid + yesAsk) / 2 : last || yesAsk || yesBid || 0;
+        const noPrice = noBid && noAsk ? (noBid + noAsk) / 2 : (1 - yesPrice) || 0;
+
+        // Prefer 24h rolling volume; fall back to lifetime volume, then liquidity, then notional.
+        const volume = kalshiNumber(
+          market.volume_24h_fp,
+          market.volume_fp,
+          market.volume,
+          market.liquidity_dollars,
+          market.notional_value_dollars
+        );
+
         results.push({
           id: `kalshi-${market.ticker}`,
           exchange: 'kalshi',
           symbol: market.ticker,
           title: market.title || event.title,
-          price: market.last_price / 100,
+          price: last || yesPrice,
           yesPrice,
           noPrice,
-          volume: market.volume,
+          volume,
           endDate: market.close_time,
           category: event.category,
           url: `https://kalshi.com/markets/${event.event_ticker}`,

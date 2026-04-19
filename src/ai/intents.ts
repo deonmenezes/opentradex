@@ -12,6 +12,7 @@
 
 import { getAgent, AgentConfig } from '../agent/index.js';
 import { getRiskState, panicFlatten, getOpenPositions, closePosition as closeHarnessPosition, recordPosition } from '../risk.js';
+import { getScraperService } from '../scraper/service.js';
 import { getAI } from './index.js';
 import type { OpenTradex } from '../index.js';
 
@@ -390,6 +391,58 @@ const INTENTS: Intent[] = [
       } catch (err) {
         return { action: 'trade.buy.rejected', reply: `Buy rejected: ${(err as Error).message}` };
       }
+    },
+  },
+
+  // KALSHI TRADE — "kalshi buy yes KXEARTHQUAKECALIFORNIA-35 100" or "kalshi buy no <TICKER> <qty>"
+  // Uses the live scraped price and records directly into the harness ledger with exchange='kalshi'.
+  {
+    name: 'kalshi.trade',
+    help: 'kalshi buy <yes|no> <TICKER> <qty> — paper-trade a Kalshi contract at scraped mid',
+    pattern: /^\s*kalshi\s+buy\s+(yes|no)\s+([A-Za-z0-9_-]+)(?:\s+(\d+(?:\.\d+)?))?\s*$/i,
+    handler: (match, _c, ctx) => {
+      const side = match[1].toLowerCase() as 'yes' | 'no';
+      const ticker = match[2].toUpperCase();
+      const qty = match[3] ? parseFloat(match[3]) : 100;
+      const kalshiMarkets = getScraperService().getExchangeEvents('kalshi');
+      const market = kalshiMarkets.find((m) => m.symbol.toUpperCase() === ticker);
+      if (!market) {
+        return {
+          action: 'kalshi.trade.miss',
+          reply: `Kalshi market ${ticker} not found in scraper. Wait for next scrape cycle or check the ticker.`,
+        };
+      }
+      const price = side === 'yes' ? market.yesPrice ?? 0 : market.noPrice ?? 0;
+      if (!price || price <= 0 || price >= 1) {
+        return {
+          action: 'kalshi.trade.badprice',
+          reply: `No tradeable ${side.toUpperCase()} price for ${ticker} (got ${price}).`,
+        };
+      }
+      recordPosition({
+        exchange: 'kalshi',
+        symbol: ticker,
+        side,
+        size: qty,
+        avgPrice: price,
+        currentPrice: price,
+        pnl: 0,
+        pnlPercent: 0,
+      });
+      ctx.broadcast('trade', {
+        exchange: 'kalshi',
+        symbol: ticker,
+        side: 'buy',
+        quantity: qty,
+        price,
+        kalshiSide: side,
+      });
+      ctx.broadcast('positions', { positions: getOpenPositions() });
+      return {
+        action: 'kalshi.trade',
+        reply: `Bought ${qty} ${side.toUpperCase()} on ${ticker} @ ${(price * 100).toFixed(1)}¢ — "${market.title}"`,
+        data: { exchange: 'kalshi', symbol: ticker, side, qty, price, title: market.title },
+      };
     },
   },
 
