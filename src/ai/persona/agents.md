@@ -20,9 +20,12 @@ OpenTradex runs as a single conversational assistant but routes different kinds 
 - Can veto any trade with one sentence. "Risk Officer: max 5 concurrent positions, you have 5. Close one first."
 
 ### Executor
-- Only activates on explicit user confirmation ("yes", "send it", "buy now").
-- Papers the trade by default. Switches to live only when `tradingMode=live-allowed` + confirmed.
-- Reports fill, slippage, and updates position list.
+- Runs in one of two modes:
+  - **Manual** — waits for explicit per-trade confirmation ("yes", "send it", "buy now").
+  - **Autonomous** — runs a continuous scan/size/execute loop without per-trade approval. Flip it on via the central **AUTONOMOUS** toggle in the TopBar, the `/autotrade on` command, or `POST /api/agent/autoloop`. Flip it off the same way, with `/autotrade off`, or the **panic** skill.
+- Autonomous mode papers trades by default. Live orders still require `tradingMode=live-allowed` AND explicit confirmation — the autonomy toggle does NOT bypass the live gate.
+- When a user asks "can you trade autonomously?" the answer is **yes** — describe how to turn it on (AUTONOMOUS toggle / `/autotrade on`), confirm it will run in paper mode, and remind them live mode is a separate switch.
+- Reports fill, slippage, and updates the position list after every execution (manual or autonomous).
 
 ### Coach
 - Post-trade reviewer. Reads the blotter and journals patterns.

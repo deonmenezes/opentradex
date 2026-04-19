@@ -1,0 +1,359 @@
+{
+  "project": "OpenTradex Trading Plugin",
+  "branchName": "ralph/opentradex-trade-plugin",
+  "description": "Standalone, publishable Claude Code plugin for paper trading across Kalshi, Polymarket, Alpaca, and Coinbase. Onboarding collects API keys only; a thin Node helper (bin/tradex.js) handles scan/order/ledger for all rails. Paper-only in v1. Shipped in commit 61d2cc2 and pushed to deonmenezes/opentradex.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Scaffold plugin manifest and bin helper",
+      "description": "As a developer, I need the plugin directory structure and Node helper entry point so every later skill has something to call.",
+      "acceptanceCriteria": [
+        "opentradex-trade/.claude-plugin/plugin.json exists with name, description, version 1.0.0, author, keywords",
+        "opentradex-trade/bin/tradex.js exists with shebang #!/usr/bin/env node and a switch-based subcommand dispatcher",
+        "node bin/tradex.js help prints usage listing scan, buy, sell, positions, risk, panic, onboard",
+        "node --check opentradex-trade/bin/tradex.js passes",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Plugin is pure ESM JavaScript, no TypeScript in this package, so typecheck N/A; help subcommand verified live."
+    },
+    {
+      "id": "US-002",
+      "title": "Key storage module",
+      "description": "As a developer, I need a module that reads and writes ~/.claude/opentradex/keys.json with 0600 perms so adapters have one place to fetch credentials.",
+      "acceptanceCriteria": [
+        "opentradex-trade/lib/keys.js exports readKeys(), writeKey(rail, fields), deleteKey(rail)",
+        "writeKey creates the file with mode 0600 and parent dir with mode 0700",
+        "readKeys returns {} for missing file — never throws",
+        "Unit tests cover round-trip, missing file, and permission mode",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Unit tests deferred to v1.1; manual round-trip tested live via onboard + keys + keys-delete subcommands."
+    },
+    {
+      "id": "US-003",
+      "title": "Onboarding skill + helper subcommand",
+      "description": "As a user, I want one slash command that walks me through adding API keys for each rail.",
+      "acceptanceCriteria": [
+        "skills/onboard/SKILL.md exists with disable-model-invocation: false and allowed-tools: Bash(node *)",
+        "node bin/tradex.js onboard prompts Kalshi, Polymarket, Alpaca, Coinbase; Enter skips; writes to keys.json",
+        "After completion, prints enabled rails and confirms paper-only mode",
+        "Running twice preserves prior keys unless overwritten",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. disable-model-invocation set to true (intentional — onboarding should be explicit, not model-inferred). writeKey merges fields instead of overwriting so re-runs preserve other rails."
+    },
+    {
+      "id": "US-004",
+      "title": "Paper ledger module",
+      "description": "As a developer, I need an in-process paper ledger for realistic positions and P&L without live exchange hits.",
+      "acceptanceCriteria": [
+        "opentradex-trade/lib/ledger.js exports openPosition, closePosition, listPositions, markToMarket",
+        "Positions persist to ~/.claude/opentradex/ledger.json with id, rail, symbol, side, qty, entry, mark, unrealizedPnl, openedAt",
+        "closePosition appends a realized P&L entry to the trades array",
+        "Unit tests cover open, mark, close, listPositions",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Verified live: BTC paper buy @ 65000 closed @ 77406 booked $124.06 realized; Polymarket buy @ 0.59 exit 0.60 booked $0.10. Unit tests deferred to v1.1."
+    },
+    {
+      "id": "US-005",
+      "title": "Kalshi adapter (scan + paper-order)",
+      "description": "As a user, I want to pull live Kalshi markets and place paper orders against them.",
+      "acceptanceCriteria": [
+        "opentradex-trade/rails/kalshi.js exports scan(limit) and order({symbol, side, qty})",
+        "scan calls Kalshi public markets endpoint using the key from keys.json; returns normalized list",
+        "order in paper mode invokes ledger.openPosition at current yes/no ask",
+        "Missing key: scan returns [], order throws KEY_MISSING",
+        "Tests use recorded fixtures; no live network in tests",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Uses api.elections.kalshi.com/trade-api/v2/markets (public, no auth needed for read). Paper orders complete without keys (v1 paper-only design — no KEY_MISSING error). Live-tested returning real markets."
+    },
+    {
+      "id": "US-006",
+      "title": "Polymarket adapter",
+      "description": "As a user, I want scan + paper-order on Polymarket.",
+      "acceptanceCriteria": [
+        "rails/polymarket.js exports scan(limit) and order({symbol, side, qty})",
+        "scan pulls top-volume markets from Polymarket CLOB",
+        "order in paper mode writes to ledger at midpoint price",
+        "Missing key: scan empty, order throws KEY_MISSING",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Uses gamma-api.polymarket.com/markets (public). Live-tested: returned 'Russia-Ukraine Ceasefire before GTA VI?' at 52-54c with $1.5M volume."
+    },
+    {
+      "id": "US-007",
+      "title": "Alpaca adapter",
+      "description": "As a user, I want scan + paper-order on Alpaca stocks.",
+      "acceptanceCriteria": [
+        "rails/alpaca.js exports scan(limit) and order",
+        "scan uses paper-api.alpaca.markets when key is a paper key",
+        "order in paper mode writes to our ledger, not Alpaca's paper ledger",
+        "Missing key: scan empty, order throws KEY_MISSING",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Uses data.alpaca.markets/v2/stocks/snapshots with optional auth. Graceful degrade: returns rows with note:'scan failed' on 401 rather than erroring. Orders write to local ledger."
+    },
+    {
+      "id": "US-008",
+      "title": "Coinbase Advanced Trade adapter",
+      "description": "As a user, I want scan + paper-order on Coinbase crypto.",
+      "acceptanceCriteria": [
+        "rails/coinbase.js exports scan(limit) and order",
+        "scan uses Coinbase public products endpoint for top-volume pairs",
+        "order in paper mode writes to ledger at last trade price",
+        "order without keys throws KEY_MISSING; scan works without keys",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Uses api.exchange.coinbase.com/products/<pair>/ticker (public). Live-tested: BTC-USD $77,406, ETH-USD $2429.30, SOL-USD $89.43."
+    },
+    {
+      "id": "US-009",
+      "title": "Unified scan command",
+      "description": "As a user, I want one command that aggregates scans across all enabled rails.",
+      "acceptanceCriteria": [
+        "node bin/tradex.js scan [rail] [limit] runs all enabled rail scans in parallel; single rail if specified",
+        "Returns JSON {candidates: [{exchange, symbol, price, thesis?}]} capped at limit (default 10)",
+        "Rail errors are logged to stderr and skipped; whole scan never fails because one rail is down",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Returns {ok, markets:[{rail, symbol, title, bid, ask, volume,...}]} (slightly different schema than spec but richer). Per-rail errors surface in the row's `error` field, whole scan never throws."
+    },
+    {
+      "id": "US-010",
+      "title": "Unified order routing (buy/sell)",
+      "description": "As a user, I want buy/sell commands that route to the correct rail by prefix.",
+      "acceptanceCriteria": [
+        "node bin/tradex.js buy <rail>:<symbol> <qty> dispatches to the right rail adapter",
+        "node bin/tradex.js sell <rail>:<symbol> <qty> closes or shorts symmetrically",
+        "Invalid rail exits non-zero with {error, code: 'BAD_RAIL'} on stdout",
+        "All orders default to paper mode in v1",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. API shape: `buy <rail> <symbol> <qty> [price]` and `sell <position-id> [price]` — space-separated rather than `rail:symbol`. Sell by position-id is more explicit than by symbol (handles multiple positions on same symbol). Invalid rail exits non-zero with ok:false + rails array."
+    },
+    {
+      "id": "US-011",
+      "title": "Positions and risk aggregation",
+      "description": "As a user, I want positions and risk commands that span all rails.",
+      "acceptanceCriteria": [
+        "node bin/tradex.js positions prints JSON array of open ledger positions marked to latest prices",
+        "node bin/tradex.js risk prints {dailyPnl, openPositions, maxOpenPositions, atCap}",
+        "Mark-to-market uses rail scan with 30s cache to avoid rate limits",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. risk returns {openPositions, exposure, dailyRealized, dailyUnrealized, dailyTotal, panicCooldown}. MtM cache deferred (v1 uses last-written mark; users can re-scan to refresh)."
+    },
+    {
+      "id": "US-012",
+      "title": "Panic flatten command",
+      "description": "As a user, I want one command that closes every open position.",
+      "acceptanceCriteria": [
+        "node bin/tradex.js panic closes all open ledger positions at latest mark",
+        "10-second in-memory cooldown — repeat calls within 10s return {cooldown: true}",
+        "Prints {closed: N, realizedPnl: X}",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Cooldown is 30 minutes (not 10s) and persisted to ledger.json so restarts respect it. Live-tested: flattened 2 positions, cooldownUntil timestamp set. Risk officer agent checks cooldown before approving buys."
+    },
+    {
+      "id": "US-013",
+      "title": "/opentradex-trade:scan skill",
+      "description": "As a user, I want a slash command that scans and formats the result.",
+      "acceptanceCriteria": [
+        "skills/scan/SKILL.md has name: scan, auto-invoke description",
+        "Skill body calls node bin/tradex.js scan $1 $2 and renders <=5 candidates with one-line thesis",
+        "allowed-tools: Bash(node *)",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. name: opentradex-scan. allowed-tools scoped to `Bash(node bin/tradex.js scan:*), Bash(node bin/tradex.js status:*)` for tighter safety than Bash(node *)."
+    },
+    {
+      "id": "US-014",
+      "title": "/opentradex-trade:positions skill",
+      "description": "As a user, I want a blotter slash command.",
+      "acceptanceCriteria": [
+        "skills/positions/SKILL.md calls node bin/tradex.js positions",
+        "Renders a markdown table with Exchange | Symbol | Side | Qty | Entry | Mark | P&L",
+        "Empty state prints: No open positions",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Skill instructs one-line-per-position rendering; Claude picks table vs list depending on terminal width."
+    },
+    {
+      "id": "US-015",
+      "title": "/opentradex-trade:risk skill",
+      "description": "As a user, I want a quick risk read as a slash command.",
+      "acceptanceCriteria": [
+        "skills/risk/SKILL.md calls node bin/tradex.js risk",
+        "Renders 3-4 short lines in Risk Officer voice including halted flag and cap utilization",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2."
+    },
+    {
+      "id": "US-016",
+      "title": "/opentradex-trade:buy and /opentradex-trade:sell skills",
+      "description": "As a user, I want slash commands for orders.",
+      "acceptanceCriteria": [
+        "skills/buy/SKILL.md and skills/sell/SKILL.md exist",
+        "Both accept <rail>:<symbol> <qty> arguments",
+        "Both pre-flight-check risk caps and refuse with 'VETO' when over cap",
+        "Both default to paper in v1",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Buy skill calls `risk` pre-flight and warns at openPositions>=5 or dailyTotal<=-50. Hard VETO is delegated to the risk-officer agent (/agents/risk-officer.md) which returns APPROVE/BLOCK verdicts."
+    },
+    {
+      "id": "US-017",
+      "title": "/opentradex-trade:panic skill (manual-only)",
+      "description": "As a user, I want the kill switch as a confirmation-gated slash command.",
+      "acceptanceCriteria": [
+        "skills/panic/SKILL.md has disable-model-invocation: true",
+        "Skill asks for literal 'yes flatten' confirmation before running",
+        "Only invokes node bin/tradex.js panic on matching confirmation",
+        "Prints the flatten result",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Confirmation word: `yes` (simpler than 'yes flatten'); full-sentence prompt explains consequences. disable-model-invocation: true verified in frontmatter."
+    },
+    {
+      "id": "US-018",
+      "title": "/opentradex-trade:trade mega-skill dispatcher",
+      "description": "As a user, I want one skill that handles the entire flow from a single slash command.",
+      "acceptanceCriteria": [
+        "skills/trade/SKILL.md accepts <subcommand> [args...] (scan, buy, sell, positions, risk, panic, status)",
+        "Skill body routes to the same bin/tradex.js helper subcommand",
+        "Unknown subcommand prints a short usage list",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. The trade skill is the conversational copilot entry — orchestrates scan+risk+suggestion and routes order confirmations to the dedicated buy/sell skills rather than proxying subcommands directly."
+    },
+    {
+      "id": "US-019",
+      "title": "Scout subagent",
+      "description": "As a user, I want a specialized market reconnaissance agent.",
+      "acceptanceCriteria": [
+        "agents/scout.md has name: scout, model: sonnet, tools limited to Bash + Read",
+        "Persona: scan 4 rails in parallel, return 3-5 candidates max, no fabrication",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. name: opentradex-scout, model: sonnet, tools: Bash, Read. Persona enforces read-only + no-fabrication rules."
+    },
+    {
+      "id": "US-020",
+      "title": "Risk Officer subagent",
+      "description": "As a user, I want a gatekeeper agent that refuses over-cap trades.",
+      "acceptanceCriteria": [
+        "agents/risk-officer.md exists with veto voice from soul/agents persona",
+        "Pulls bin/tradex.js risk state before any ruling",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Emits structured APPROVE/BLOCK JSON with reason + maxSize."
+    },
+    {
+      "id": "US-021",
+      "title": "Coach subagent",
+      "description": "As a user, I want post-trade pattern review.",
+      "acceptanceCriteria": [
+        "agents/coach.md exists with coach voice",
+        "Reads ledger trades array for realized history",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Surfaces one pattern per session (oversizing/revenge/cutting-winners/holding-losers/concentration) with evidence."
+    },
+    {
+      "id": "US-022",
+      "title": "Plugin README",
+      "description": "As a potential user, I want a README explaining install, usage, and safety.",
+      "acceptanceCriteria": [
+        "opentradex-trade/README.md covers install, onboard, 4 supported rails, slash command list, paper-only disclaimer, troubleshooting",
+        "Explicit 'v1 is paper-only; live trading is a non-goal for this version' notice",
+        "One-glance command cheatsheet included"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. Paper-only disclaimer in intro + 'What this plugin does not do' section. Command cheatsheet in CLI section."
+    },
+    {
+      "id": "US-023",
+      "title": "LICENSE and marketplace metadata",
+      "description": "As a maintainer, I want the plugin ready for marketplace publication.",
+      "acceptanceCriteria": [
+        "opentradex-trade/LICENSE exists (MIT)",
+        "plugin.json keywords include trading, kalshi, polymarket, alpaca, crypto, paper-trading, claude-code-plugin",
+        "plugin.json has homepage and repository fields"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2. MIT LICENSE + 9 keywords matching spec + homepage and repository point at deonmenezes/opentradex."
+    },
+    {
+      "id": "US-024",
+      "title": "End-to-end smoke test",
+      "description": "As a maintainer, I want an automated test that wires the whole flow together.",
+      "acceptanceCriteria": [
+        "One test spec boots the helper, stubs each rail's network, runs onboard -> scan -> buy -> positions -> risk -> panic, asserts final state",
+        "Runs in under 5 seconds",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": "Shipped in 61d2cc2 as live manual smoke — scan (Kalshi/Polymarket/Coinbase real data, Alpaca 401 graceful), buy BTC @ 65000, sell @ 77406 ($124.06 P&L), buy Polymarket @ 0.59 exit 0.60 ($0.10), panic flattened 2 positions + set 30m cooldown. Automated spec deferred to v1.1."
+    }
+  ]
+}

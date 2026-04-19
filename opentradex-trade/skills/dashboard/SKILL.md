@@ -1,7 +1,7 @@
 ---
 name: opentradex-dashboard
 description: Open a local web dashboard showing open positions, exposure, daily P&L, and recent trades. Invoke when the user says "dashboard", "open dashboard", "show my book", "pnl screen", or asks to visualise their paper-trading state. Runs a zero-dependency HTTP server on 127.0.0.1 and prints the URL.
-allowed-tools: Bash(node bin/tradex.js dashboard:*)
+allowed-tools: Bash(node *tradex.js dashboard:*)
 argument-hint: [--port N]
 ---
 
@@ -14,7 +14,7 @@ User arguments: `$ARGUMENTS` — optional `--port N` (default 3300).
 ## Flow
 
 1. Start the dashboard server in the background so the user's terminal stays free:
-   !`node bin/tradex.js dashboard $ARGUMENTS`
+   !`node "${CLAUDE_PLUGIN_ROOT}/bin/tradex.js" dashboard $ARGUMENTS`
 2. Once the server prints `OpenTradex dashboard running at http://127.0.0.1:<port>`, tell the user the URL in plain text and say they can open it in any browser.
 3. If the port is already in use, re-run with `--port 3301` (or next free port) and inform the user.
 

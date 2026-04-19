@@ -16,6 +16,9 @@ import { addressFromKey, generatePrivateKey, isPaymentsActive, loadX402Settings,
 import type { Exchange } from '../types.js';
 import { getScraperService } from '../scraper/service.js';
 import { getMemory } from '../ai/memory.js';
+import { routeIntent } from '../ai/intents.js';
+import { SKILLS, getSkill, renderCommand, getAllCategories } from '../agent/skills-registry.js';
+import { recordRun, getRuns, generateRunId } from '../agent/runs-log.js';
 
 // Get the directory of this file to find the dashboard
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -459,19 +462,29 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         return json(res, result);
       }
 
-      // Command - AI-powered
+      // Command - AI-powered with intent routing to agent/harness
       if ((path === '/command' || path === '/api/command') && req.method === 'POST') {
         const body = await readBody(req);
         const { command } = JSON.parse(body);
 
         let response = '';
         let aiUsed = false;
+        let action: string | null = null;
 
-        // Try AI first if available
+        // 1. Try deterministic intent routing first — this is the AI↔agent bridge.
+        //    If the user said "start trading", "panic", "buy 10 AAPL", etc.,
+        //    we execute the action and skip the conversational AI.
+        const intent = await routeIntent(command, { harness, broadcast });
+        if (intent) {
+          response = intent.reply;
+          action = intent.action;
+        }
+
+        // 2. Fall through to conversational AI if no intent matched.
         const ai = getAI();
         const memory = getMemory();
         const memoryUserId = 'local';
-        if (ai.isAvailable()) {
+        if (!intent && ai.isAvailable()) {
           try {
             let enhancedCommand = command;
             if (command.toLowerCase().includes('scan') || command.toLowerCase().includes('market')) {
@@ -495,24 +508,23 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
           }
         }
 
-        // Fallback to basic command handling if AI not available
-        if (!aiUsed) {
-          if (command.toLowerCase().includes('scan')) {
-            const markets = await harness.scanAll(5);
-            response = `Found ${markets.length} markets:\n${markets.map((m) => `- ${m.exchange}: ${m.symbol} @ ${m.price}`).join('\n')}`;
-          } else if (command.toLowerCase().includes('risk')) {
-            const state = getRiskState();
-            response = `Risk State:\n- Daily P&L: $${state.dailyPnL.toFixed(2)}\n- Open Positions: ${state.openPositions.length}\n- Trades Today: ${state.dailyTrades}`;
-          } else if (command.toLowerCase().includes('status')) {
+        // 3. Deterministic fallback if neither intent nor AI produced output.
+        if (!intent && !aiUsed) {
+          if (command.toLowerCase().includes('status')) {
             const mode = readModeLock();
             response = `Status: ${mode || 'not configured'}\nExchanges: ${harness.exchanges.join(', ')}`;
           } else {
-            response = `Command received: "${command}"\n\nAI not configured. Run \`npx opentradex onboard\` to enable AI features.\n\nBasic commands available:\n- "scan markets"\n- "risk status"\n- "show status"`;
+            response = `Command received: "${command}"\n\nAI not configured. Run \`npx opentradex onboard\` to enable AI features.\n\nBasic commands available:\n- "start trading"  (autonomous loop)\n- "stop trading"\n- "scan markets"\n- "risk"  (daily P&L)\n- "positions"\n- "panic"  (flatten all)\n- "buy 10 AAPL" / "sell 5 BTC"`;
           }
         }
 
-        broadcast('command', { command, response, aiUsed });
-        return json(res, { command, response, aiUsed });
+        // Remember both user input and our reply when memory is available.
+        if (intent) {
+          void memory.remember({ userId: memoryUserId, userMessage: command, assistantMessage: response });
+        }
+
+        broadcast('command', { command, response, aiUsed, action });
+        return json(res, { command, response, aiUsed, action });
       }
 
       // Panic
@@ -914,11 +926,375 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         return json(res, { news: scraper.getNews(limit) });
       }
 
-      // Exchange events (Polymarket, Kalshi, Binance)
+      // Exchange events (Polymarket, Kalshi, Binance, Coinbase, PredictIt, Manifold)
       if (path === '/api/scraper/exchanges') {
         const scraper = getScraperService();
         const exchange = params.get('exchange');
         return json(res, { events: scraper.getExchangeEvents(exchange || undefined) });
+      }
+
+      // Scraper health per exchange — used by dashboard Scraper Health panel (US-010)
+      if (path === '/api/scraper/health') {
+        const scraper = getScraperService();
+        return json(res, { health: scraper.getExchangeHealth() });
+      }
+
+      // Ranked trade candidates across all exchanges — used by dashboard + auto-loop (US-013)
+      if (path === '/api/agent/candidates') {
+        const { aggregateSignals } = await import('../agent/strategies/index.js');
+        const scraper = getScraperService();
+        const topN = parseInt(params.get('topN') || '10');
+        const candidates = aggregateSignals(scraper.getExchangeEvents(), { topN: Math.min(Math.max(topN, 1), 50) });
+        return json(res, { candidates });
+      }
+
+      // Agent Command Center: skills registry — enumerate all executable skills
+      if (path === '/api/agent/skills' && req.method === 'GET') {
+        return json(res, { skills: SKILLS, categories: getAllCategories() });
+      }
+
+      // Agent Command Center: audit log of all skill runs
+      if (path === '/api/agent/runs' && req.method === 'GET') {
+        const limit = Math.min(parseInt(params.get('limit') || '50'), 200);
+        const filterRaw = params.get('filter');
+        const filter = filterRaw === 'user' || filterRaw === 'agent' || filterRaw === 'chain' ? filterRaw : undefined;
+        return json(res, { runs: getRuns(limit, filter) });
+      }
+
+      // Agent Command Center: invoke a skill by id
+      // Body: { args: {...}, confirmed?: boolean, source?: 'user'|'agent'|'chain', chainId?: string }
+      if (path.startsWith('/api/agent/skills/') && path.endsWith('/invoke') && req.method === 'POST') {
+        const skillId = path.slice('/api/agent/skills/'.length, -('/invoke'.length));
+        const skill = getSkill(skillId);
+        if (!skill) return error(res, `Unknown skill: ${skillId}`, 404, 'SKILL_NOT_FOUND');
+
+        const body = await readBody(req);
+        const parsed = body ? JSON.parse(body) : {};
+        const skillArgs: Record<string, string | number> = parsed.args ?? {};
+        const confirmed: boolean = parsed.confirmed === true;
+        const source: 'user' | 'agent' | 'chain' = parsed.source === 'agent' || parsed.source === 'chain' ? parsed.source : 'user';
+        const chainId: string | undefined = typeof parsed.chainId === 'string' ? parsed.chainId : undefined;
+
+        const runId = generateRunId();
+        const startedAt = Date.now();
+
+        // Missing-required-arg check
+        const missing = skill.args.filter((a) => a.required && (skillArgs[a.name] === undefined || skillArgs[a.name] === '')).map((a) => a.name);
+        if (missing.length) {
+          const run = {
+            runId, skillId: skill.id, skillName: skill.name, args: skillArgs,
+            command: skill.commandTemplate, source, status: 'failed' as const,
+            output: `Missing required args: ${missing.join(', ')}`,
+            startedAt, durationMs: Date.now() - startedAt, chainId,
+          };
+          recordRun(run);
+          return json(res, { runId, status: 'failed', output: run.output, durationMs: run.durationMs });
+        }
+
+        // Destructive confirmation gate
+        if (skill.destructive && skill.requiresConfirmation && !confirmed) {
+          const run = {
+            runId, skillId: skill.id, skillName: skill.name, args: skillArgs,
+            command: renderCommand(skill, skillArgs), source, status: 'blocked' as const,
+            output: `Confirmation required (word: ${skill.confirmWord ?? skill.id})`,
+            startedAt, durationMs: Date.now() - startedAt, chainId,
+          };
+          recordRun(run);
+          return json(res, { runId, status: 'blocked', reason: 'confirmation_required', confirmWord: skill.confirmWord, output: run.output });
+        }
+
+        // Render and execute
+        const command = renderCommand(skill, skillArgs);
+        let status: 'ok' | 'failed' = 'ok';
+        let output = '';
+        let action: string | null = null;
+        try {
+          // Hardcoded routes for skills that map to gateway endpoints rather than the intent router
+          if (skill.id === 'panic') {
+            const flattened = panicFlatten();
+            output = `PANIC — flattened ${flattened.flattened.length} position(s), realized $${flattened.totalPnL.toFixed(2)}`;
+            action = 'panic';
+            broadcast('positions', { positions: [] });
+          } else if (skill.id === 'autoloop') {
+            const enabled = String(skillArgs.enabled).toLowerCase() === 'on';
+            const minutes = Math.max(1, Number(skillArgs.minutes ?? 5));
+            // Delegate to the existing /api/agent/autoloop endpoint logic by calling harness directly if available
+            const h = harness as unknown as { startAutoLoop?: (m: number) => void; stopAutoLoop?: () => void };
+            if (enabled) h.startAutoLoop?.(minutes);
+            else h.stopAutoLoop?.();
+            output = `Auto-loop ${enabled ? `enabled (every ${minutes}m)` : 'disabled'}`;
+            action = 'autoloop';
+          } else if (skill.id === 'candidates') {
+            const { aggregateSignals } = await import('../agent/strategies/index.js');
+            const scraper = getScraperService();
+            const topN = Math.min(Math.max(Number(skillArgs.topN ?? 10), 1), 50);
+            const candidates = aggregateSignals(scraper.getExchangeEvents(), { topN });
+            output = `Top ${candidates.length} candidates:\n${candidates.map((c, i) => `${i + 1}. ${c.symbol} (${c.exchange}) · score ${c.score} · ${c.side} @ ${c.entryPrice}`).join('\n')}`;
+            action = 'candidates';
+          } else {
+            // Route through the intent router (same path as /api/command)
+            const intent = await routeIntent(command, { harness, broadcast });
+            if (intent) {
+              output = intent.reply;
+              action = intent.action;
+            } else {
+              status = 'failed';
+              output = `Intent router could not execute: "${command}". Check args.`;
+            }
+          }
+        } catch (err) {
+          status = 'failed';
+          output = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+
+        const durationMs = Date.now() - startedAt;
+        recordRun({
+          runId, skillId: skill.id, skillName: skill.name, args: skillArgs,
+          command, source, status, output, startedAt, durationMs, chainId,
+        });
+        broadcast('run', { runId, skillId: skill.id, status, output, durationMs });
+        return json(res, { runId, status, output, action, durationMs });
+      }
+
+      // Agent Command Center: live dashboard snapshot the agent can read before acting.
+      // Gives the LLM (and UI flow visualizer) a single JSON view of harness state:
+      // mode, risk, open positions, connectors, recent activity, enabled rails.
+      if (path === '/api/agent/context' && req.method === 'GET') {
+        const risk = getRiskState();
+        const scraper = getScraperService();
+        const health = scraper.getExchangeHealth();
+        const lastRuns = getRuns(10);
+        const modeLock = readModeLock();
+        const appConfigCtx = loadConfig();
+        const enabledRails = appConfigCtx?.rails
+          ? Object.entries(appConfigCtx.rails).filter(([, v]) => v.enabled).map(([k]) => k)
+          : [];
+        return json(res, {
+          mode: appConfigCtx?.tradingMode || 'paper-only',
+          modeLock,
+          tradingHalted: isTradingHalted(),
+          risk: {
+            equity: getEquity(),
+            dailyPnL: risk.dailyPnL,
+            openPositions: risk.openPositions.length,
+            dailyTrades: risk.dailyTrades,
+          },
+          positions: risk.openPositions,
+          scraperHealth: health.map((h) => ({
+            name: h.exchange,
+            ok: h.status !== 'red',
+            status: h.status,
+            count: h.count,
+            ageSec: h.ageSec,
+            lastUpdate: h.lastUpdate,
+          })),
+          rails: enabledRails,
+          recentRuns: lastRuns,
+          skills: SKILLS.map((s) => ({
+            id: s.id,
+            name: s.name,
+            category: s.category,
+            destructive: s.destructive,
+          })),
+          aiProviders: listSavedProviders(),
+          timestamp: Date.now(),
+        });
+      }
+
+      // Agent Command Center: proactive suggestions based on current state.
+      // Returns up to 5 ranked skill suggestions with reasoning. Surfaced in the UI
+      // so the user sees "Top of mind: review panic if daily drawdown > X".
+      if (path === '/api/agent/suggest' && req.method === 'GET') {
+        const risk = getRiskState();
+        const scraper = getScraperService();
+        const health = scraper.getExchangeHealth();
+        const suggestions: Array<{ skillId: string; reason: string; priority: 'high' | 'normal' | 'low' }> = [];
+
+        // Dead scrapers? Surface risk check before trading
+        const deadScrapers = health.filter((e) => e.status === 'red');
+        if (deadScrapers.length > 0) {
+          suggestions.push({
+            skillId: 'risk',
+            reason: `${deadScrapers.length} scraper(s) offline: ${deadScrapers.map((e) => e.exchange).join(', ')}. Check risk state first.`,
+            priority: 'high',
+          });
+        }
+
+        // No positions yet? Nudge toward scanning
+        if (risk.openPositions.length === 0) {
+          suggestions.push({
+            skillId: 'candidates',
+            reason: 'No open positions. Run ranked candidates to find cross-venue edges.',
+            priority: 'normal',
+          });
+        }
+
+        // Drawdown — surface panic as an option (not executed, just visible)
+        if (risk.dailyPnL < -500) {
+          suggestions.push({
+            skillId: 'panic',
+            reason: `Daily P&L is $${risk.dailyPnL.toFixed(2)}. Panic-flatten is available if drawdown continues.`,
+            priority: 'high',
+          });
+        }
+
+        // Many open positions? Suggest inspect
+        if (risk.openPositions.length >= 3) {
+          suggestions.push({
+            skillId: 'positions',
+            reason: `${risk.openPositions.length} open positions. Review each for profit-taking.`,
+            priority: 'normal',
+          });
+        }
+
+        // No AI provider? Suggest onboard
+        const providers = listSavedProviders();
+        if (providers.length === 0) {
+          suggestions.push({
+            skillId: 'onboard',
+            reason: 'No AI provider configured. Run onboarding to enable LLM-backed analysis.',
+            priority: 'high',
+          });
+        }
+
+        // Always include "scan" as default exploration
+        if (suggestions.length < 3) {
+          suggestions.push({
+            skillId: 'scan',
+            reason: 'Scan live markets for ranked opportunities.',
+            priority: 'low',
+          });
+        }
+
+        return json(res, { suggestions: suggestions.slice(0, 5), timestamp: Date.now() });
+      }
+
+      // Agent Command Center: run a chain of skills sequentially (US-009).
+      // Body: { steps: Array<{ skillId, args, confirmed?: boolean }>, dryRun?: boolean }
+      // Response: { chainId, steps: Array<{skillId, status, output, runId?}> }
+      // A chain aborts at the first `failed` or `blocked` step. Destructive skills
+      // must be pre-confirmed by passing confirmed:true on each step.
+      if (path === '/api/agent/chains/run' && req.method === 'POST') {
+        const body = await readBody(req);
+        const parsed = body ? JSON.parse(body) : {};
+        const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+        const dryRun = parsed.dryRun === true;
+        if (steps.length === 0) return error(res, 'steps array required', 400);
+        if (steps.length > 6) return error(res, 'max 6 steps per chain', 400);
+
+        const chainId = `chain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const results: Array<{ skillId: string; status: string; output: string; runId?: string; args: Record<string, unknown> }> = [];
+        let previousOutput = '';
+
+        broadcast('chain:start', { chainId, stepCount: steps.length });
+
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i];
+          const skill = getSkill(step.skillId);
+          if (!skill) {
+            results.push({ skillId: step.skillId, status: 'failed', output: `Unknown skill: ${step.skillId}`, args: step.args ?? {} });
+            broadcast('chain:step', { chainId, index: i, skillId: step.skillId, status: 'failed' });
+            break;
+          }
+
+          // Resolve template tokens: {previous.output} → last step's output
+          const resolvedArgs: Record<string, string | number> = {};
+          for (const [k, v] of Object.entries(step.args ?? {})) {
+            if (typeof v === 'string' && v.includes('{previous.output}')) {
+              resolvedArgs[k] = v.replace(/\{previous\.output\}/g, previousOutput.slice(0, 200));
+            } else {
+              resolvedArgs[k] = v as string | number;
+            }
+          }
+
+          broadcast('chain:step:start', { chainId, index: i, skillId: skill.id, args: resolvedArgs });
+
+          if (dryRun) {
+            results.push({
+              skillId: skill.id,
+              status: 'dry-run',
+              output: `[dry] would run: ${renderCommand(skill, resolvedArgs)}`,
+              args: resolvedArgs,
+            });
+            broadcast('chain:step', { chainId, index: i, skillId: skill.id, status: 'dry-run' });
+            continue;
+          }
+
+          // Destructive gate — honour confirmation per step
+          const confirmed = step.confirmed === true;
+          if (skill.destructive && skill.requiresConfirmation && !confirmed) {
+            const runId = generateRunId();
+            const output = `Confirmation required (word: ${skill.confirmWord ?? skill.id})`;
+            recordRun({
+              runId, skillId: skill.id, skillName: skill.name, args: resolvedArgs,
+              command: renderCommand(skill, resolvedArgs), source: 'chain',
+              status: 'blocked', output, startedAt: Date.now(), durationMs: 0, chainId,
+            });
+            results.push({ skillId: skill.id, status: 'blocked', output, runId, args: resolvedArgs });
+            broadcast('chain:step', { chainId, index: i, skillId: skill.id, status: 'blocked' });
+            break;
+          }
+
+          // Missing-required-arg check
+          const missing = skill.args.filter((a) => a.required && (resolvedArgs[a.name] === undefined || resolvedArgs[a.name] === '')).map((a) => a.name);
+          if (missing.length) {
+            const runId = generateRunId();
+            const output = `Missing required args: ${missing.join(', ')}`;
+            recordRun({
+              runId, skillId: skill.id, skillName: skill.name, args: resolvedArgs,
+              command: skill.commandTemplate, source: 'chain',
+              status: 'failed', output, startedAt: Date.now(), durationMs: 0, chainId,
+            });
+            results.push({ skillId: skill.id, status: 'failed', output, runId, args: resolvedArgs });
+            broadcast('chain:step', { chainId, index: i, skillId: skill.id, status: 'failed' });
+            break;
+          }
+
+          // Execute via same path as invoke endpoint
+          const command = renderCommand(skill, resolvedArgs);
+          const runId = generateRunId();
+          const startedAt = Date.now();
+          let status: 'ok' | 'failed' = 'ok';
+          let output = '';
+          try {
+            if (skill.id === 'panic') {
+              const flattened = panicFlatten();
+              output = `PANIC — flattened ${flattened.flattened.length} position(s), realized $${flattened.totalPnL.toFixed(2)}`;
+              broadcast('positions', { positions: [] });
+            } else if (skill.id === 'candidates') {
+              const { aggregateSignals } = await import('../agent/strategies/index.js');
+              const scraper = getScraperService();
+              const topN = Math.min(Math.max(Number(resolvedArgs.topN ?? 10), 1), 50);
+              const candidates = aggregateSignals(scraper.getExchangeEvents(), { topN });
+              output = `Top ${candidates.length} candidates:\n${candidates.map((c, idx) => `${idx + 1}. ${c.symbol} (${c.exchange}) · score ${c.score}`).join('\n')}`;
+            } else {
+              const intent = await routeIntent(command, { harness, broadcast });
+              if (intent) {
+                output = intent.reply;
+              } else {
+                status = 'failed';
+                output = `Intent router could not execute: "${command}"`;
+              }
+            }
+          } catch (err) {
+            status = 'failed';
+            output = `Error: ${err instanceof Error ? err.message : String(err)}`;
+          }
+
+          const durationMs = Date.now() - startedAt;
+          recordRun({
+            runId, skillId: skill.id, skillName: skill.name, args: resolvedArgs,
+            command, source: 'chain', status, output, startedAt, durationMs, chainId,
+          });
+          results.push({ skillId: skill.id, status, output, runId, args: resolvedArgs });
+          broadcast('chain:step', { chainId, index: i, skillId: skill.id, status });
+          previousOutput = output;
+
+          if (status === 'failed') break;
+        }
+
+        broadcast('chain:complete', { chainId, stepsRun: results.length });
+        return json(res, { chainId, steps: results, dryRun });
       }
 
       // Force refresh all scraped data

@@ -1,9 +1,13 @@
 import { useState, useEffect, memo } from 'react';
 import type { HarnessStatus, WsMeta } from '../lib/types';
+import type { AgentContext } from '../hooks/useAgentContext';
+import HarnessStatusBadges from './HarnessStatusBadges';
 
 interface TopBarProps {
   status: HarnessStatus;
   wsMeta?: WsMeta;
+  agentContext?: AgentContext | null;
+  activeRunCount?: number;
   onRunCycle?: () => void;
   onToggleAutoLoop?: () => void;
   onSetLoopInterval?: (minutes: number) => void;
@@ -12,13 +16,19 @@ interface TopBarProps {
   onShowTrades?: () => void;
   onShowMarkets?: () => void;
   onShowPayments?: () => void;
+  onShowSkills?: () => void;
+  onOpenPalette?: () => void;
   onOpenSetup?: () => void;
+  onOpenChain?: () => void;
+  onOpenHelp?: () => void;
 }
 
 // Memoized TopBar to prevent unnecessary re-renders
 export default memo(function TopBar({
   status,
   wsMeta,
+  agentContext,
+  activeRunCount = 0,
   onRunCycle,
   onToggleAutoLoop,
   onSetLoopInterval,
@@ -27,7 +37,11 @@ export default memo(function TopBar({
   onShowTrades,
   onShowMarkets,
   onShowPayments,
-  onOpenSetup
+  onShowSkills,
+  onOpenPalette,
+  onOpenSetup,
+  onOpenChain,
+  onOpenHelp,
 }: TopBarProps) {
   const [loopMenuOpen, setLoopMenuOpen] = useState(false);
   const loopIntervals = [1, 2, 5, 10, 15, 30];
@@ -168,6 +182,55 @@ export default memo(function TopBar({
           </span>
         </div>
 
+        {/* Central AUTONOMOUS toggle — flips the agent's autoloop on/off.
+            Paper-mode by default; live-mode is still gated on `tradingMode=live-allowed`. */}
+        <button
+          onClick={() => {
+            if (status.isAutoLoop) {
+              if (onSetLoopInterval) onSetLoopInterval(0);
+              else if (onToggleAutoLoop) onToggleAutoLoop();
+            } else {
+              const minutes = status.cycleInterval || 5;
+              if (onSetLoopInterval) onSetLoopInterval(minutes);
+              else if (onToggleAutoLoop) onToggleAutoLoop();
+            }
+          }}
+          data-testid="autonomous-toggle"
+          data-active={status.isAutoLoop}
+          aria-pressed={status.isAutoLoop}
+          title={status.isAutoLoop
+            ? `Autonomous ON — scanning every ${status.cycleInterval}m. Click to stop.`
+            : 'Click to start autonomous trading (paper mode). Live mode still requires explicit confirmation.'}
+          className={`relative flex items-center gap-2 px-3 md:px-5 py-2 rounded-lg font-bold text-xs md:text-sm uppercase tracking-wider transition-all ${
+            status.isAutoLoop
+              ? 'bg-accent text-bg shadow-lg shadow-accent/50 ring-2 ring-accent/60'
+              : 'bg-surface-2 text-text-dim border-2 border-dashed border-border hover:border-accent hover:text-accent'
+          }`}
+        >
+          {status.isAutoLoop && (
+            <span className="absolute -top-1 -right-1 flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-accent" />
+            </span>
+          )}
+          <svg
+            className={`w-4 h-4 ${status.isAutoLoop ? 'animate-spin' : ''}`}
+            style={{ animationDuration: '3s' }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2}
+              d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span className="hidden sm:inline">
+            {status.isAutoLoop ? `Autonomous · ${status.cycleInterval}m` : 'Autonomous'}
+          </span>
+          <span className="sm:hidden">
+            {status.isAutoLoop ? 'ON' : 'AUTO'}
+          </span>
+        </button>
+
         {/* Stats - inline chips on large screens */}
         <div className="hidden xl:flex items-center gap-3 text-xs">
           <button
@@ -208,6 +271,66 @@ export default memo(function TopBar({
 
       {/* Right: Controls */}
       <div className="flex items-center gap-2 md:gap-3">
+        {/* Harness health badges (scraper/halt/active-runs) */}
+        <HarnessStatusBadges context={agentContext ?? null} activeRunCount={activeRunCount} />
+
+        {/* Command Palette trigger (⌘K) */}
+        <button
+          onClick={onOpenPalette}
+          data-testid="palette-trigger"
+          title="Open command palette (⌘K)"
+          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-2 border border-border hover:border-accent transition-colors text-xs text-text-dim hover:text-text"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span className="hidden md:inline">Skills</span>
+          <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-bg text-2xs border border-border font-mono">⌘K</kbd>
+        </button>
+
+        {/* Chain builder trigger */}
+        {onOpenChain && (
+          <button
+            onClick={onOpenChain}
+            data-testid="chain-trigger"
+            title="Build a skill chain (c)"
+            className="hidden md:inline-flex p-2 rounded-lg bg-surface-2 hover:bg-card-hover text-text-dim hover:text-accent transition-colors"
+            aria-label="Chain builder"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+          </button>
+        )}
+
+        {/* Help trigger */}
+        {onOpenHelp && (
+          <button
+            onClick={onOpenHelp}
+            data-testid="help-trigger"
+            title="Keyboard shortcuts (?)"
+            className="hidden md:inline-flex p-2 rounded-lg bg-surface-2 hover:bg-card-hover text-text-dim hover:text-accent transition-colors"
+            aria-label="Keyboard shortcuts"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+        )}
+
+        {/* Skills page link */}
+        <button
+          onClick={onShowSkills}
+          data-testid="skills-nav"
+          title="Open skills page"
+          className="hidden md:inline-flex p-2 rounded-lg bg-surface-2 hover:bg-card-hover text-text-dim hover:text-accent transition-colors"
+          aria-label="Skills"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+        </button>
+
         {/* Run Cycle - Responsive */}
         <button
           onClick={onRunCycle}

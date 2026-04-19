@@ -26,7 +26,7 @@ jobs:
           cache: npm
 
       - name: Install root dependencies
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-audit --no-fund --workspaces=false --include-workspace-root
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -36,3 +36,5 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          SKIP_LIVE: '1'

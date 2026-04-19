@@ -9,6 +9,7 @@
     "dev": "electron .",
     "build": "tsc && electron-builder",
     "build:win": "tsc && electron-builder --win",
+    "build:store": "tsc && electron-builder --win appx --x64",
     "build:mac": "tsc && electron-builder --mac",
     "build:linux": "tsc && electron-builder --linux",
     "pack": "electron-builder --dir"
@@ -78,10 +79,14 @@
       "createStartMenuShortcut": true
     },
     "appx": {
-      "identityName": "OpenTradex",
+      "identityName": "OpenTradex.OpenTradex",
       "displayName": "OpenTradex",
       "publisher": "CN=OpenTradex",
-      "publisherDisplayName": "OpenTradex"
+      "publisherDisplayName": "OpenTradex",
+      "applicationId": "OpenTradex",
+      "backgroundColor": "#0a0f1e",
+      "showNameOnTiles": true,
+      "languages": ["en-US"]
     },
     "mas": {
       "entitlements": "entitlements.mas.plist",

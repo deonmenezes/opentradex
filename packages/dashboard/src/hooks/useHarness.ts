@@ -113,8 +113,35 @@ export function useHarness() {
         }
         return [payload, ...prev];
       });
+    } else if (data.type === 'positions') {
+      // Full positions-array replacement (emitted after close/reduce/add)
+      const payload = data.payload as { positions: Position[] } | Position[];
+      const list = Array.isArray(payload) ? payload : payload?.positions;
+      if (Array.isArray(list)) setPositions(list);
     } else if (data.type === 'trade') {
-      setTrades((prev) => [data.payload as Trade, ...prev.slice(0, 19)]);
+      const raw = data.payload as Record<string, unknown>;
+      const sideRaw = String(raw.side || '').toLowerCase();
+      const ts =
+        typeof raw.timestamp === 'number'
+          ? raw.timestamp
+          : raw.timestamp
+          ? new Date(raw.timestamp as string | Date).getTime()
+          : Date.now();
+      const mappedSide =
+        sideRaw === 'buy' ? 'long' : sideRaw === 'sell' ? 'short' : (sideRaw as Trade['side']);
+      const normalized: Trade = {
+        id: String(raw.id ?? raw.orderId ?? `TR-${ts}-${raw.symbol}`),
+        exchange: String(raw.exchange ?? 'unknown'),
+        symbol: String(raw.symbol ?? '?'),
+        side: mappedSide || 'long',
+        size: Number(raw.size ?? raw.quantity ?? 0),
+        price: Number(raw.price ?? 0),
+        pnl: raw.realizedPnL != null ? Number(raw.realizedPnL) : raw.pnl != null ? Number(raw.pnl) : undefined,
+        status: raw.closed || raw.reduced ? 'closed' : raw.added ? 'open' : raw.success === false ? 'pending' : 'open',
+        timestamp: ts,
+        age: 'just now',
+      };
+      setTrades((prev) => [normalized, ...prev.slice(0, 19)]);
     } else if (data.type === 'feed') {
       setFeed((prev) => [data.payload as FeedItem, ...prev.slice(0, 49)]);
     } else if (data.type === 'market') {

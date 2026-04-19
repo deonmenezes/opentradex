@@ -193,6 +193,14 @@ export class AIAgent extends EventEmitter {
       // 4. Update positions
       this.status.openPositions = await this.executor.getOpenPositionCount();
 
+      this.journal.push({
+        cycle: this.status.cycles,
+        ts: new Date(),
+        opportunities: opportunities.length,
+        executed: approved.length,
+      });
+      if (this.journal.length > 500) this.journal.splice(0, this.journal.length - 500);
+
       this.emit('cycle-complete', {
         cycle: this.status.cycles,
         opportunities: opportunities.length,
@@ -227,6 +235,16 @@ export class AIAgent extends EventEmitter {
   getConfig(): AgentConfig {
     return { ...this.config };
   }
+
+  getScanner(): MarketScanner {
+    return this.scanner;
+  }
+
+  getJournal(): Array<{ cycle: number; ts: Date; opportunities: number; executed: number }> {
+    return [...this.journal];
+  }
+
+  private journal: Array<{ cycle: number; ts: Date; opportunities: number; executed: number }> = [];
 
   updateConfig(updates: Partial<AgentConfig>): void {
     this.config = { ...this.config, ...updates };
