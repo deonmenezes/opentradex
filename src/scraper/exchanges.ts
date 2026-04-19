@@ -26,47 +26,58 @@ interface PolymarketEvent {
   }>;
 }
 
-export async function scrapePolymarket(limit = 20): Promise<ScrapedExchangeEvent[]> {
-  const url = `https://gamma-api.polymarket.com/events?closed=false&limit=${limit}&order=volume24hr&ascending=false`;
+const PAGE_SIZE = 100;
+const MAX_MARKETS = Number(process.env.SCRAPER_MAX_MARKETS ?? 500);
+
+export async function scrapePolymarket(maxMarkets = MAX_MARKETS): Promise<ScrapedExchangeEvent[]> {
+  const results: ScrapedExchangeEvent[] = [];
+  let offset = 0;
 
   try {
-    const res = await smartFetch(url);
-    if (!res.ok) return [];
+    while (results.length < maxMarkets) {
+      const url = `https://gamma-api.polymarket.com/events?closed=false&limit=${PAGE_SIZE}&offset=${offset}&order=volume24hr&ascending=false`;
+      const res = await smartFetch(url);
+      if (!res.ok) break;
 
-    const events = res.json<PolymarketEvent[]>();
-    const results: ScrapedExchangeEvent[] = [];
+      const events = res.json<PolymarketEvent[]>();
+      if (!events?.length) break;
 
-    for (const event of events) {
-      for (const market of event.markets) {
-        let yesPrice = 0.5;
-        let noPrice = 0.5;
-        try {
-          const prices = JSON.parse(market.outcomePrices || '[]');
-          yesPrice = parseFloat(prices[0]) || 0.5;
-          noPrice = parseFloat(prices[1]) || 1 - yesPrice;
-        } catch { /* use defaults */ }
+      for (const event of events) {
+        for (const market of event.markets) {
+          let yesPrice = 0.5;
+          let noPrice = 0.5;
+          try {
+            const prices = JSON.parse(market.outcomePrices || '[]');
+            yesPrice = parseFloat(prices[0]) || 0.5;
+            noPrice = parseFloat(prices[1]) || 1 - yesPrice;
+          } catch { /* use defaults */ }
 
-        results.push({
-          id: `poly-${market.id}`,
-          exchange: 'polymarket',
-          symbol: event.slug || market.id,
-          title: market.question || event.title,
-          price: yesPrice,
-          yesPrice,
-          noPrice,
-          volume: parseFloat(market.volume) || 0,
-          endDate: event.end_date_iso,
-          category: 'prediction',
-          url: `https://polymarket.com/event/${event.slug}`,
-          timestamp: Date.now(),
-        });
+          results.push({
+            id: `poly-${market.id}`,
+            exchange: 'polymarket',
+            symbol: event.slug || market.id,
+            title: market.question || event.title,
+            price: yesPrice,
+            yesPrice,
+            noPrice,
+            volume: parseFloat(market.volume) || 0,
+            endDate: event.end_date_iso,
+            category: 'prediction',
+            url: `https://polymarket.com/event/${event.slug}`,
+            timestamp: Date.now(),
+          });
+          if (results.length >= maxMarkets) break;
+        }
+        if (results.length >= maxMarkets) break;
       }
-    }
 
+      if (events.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
     return results;
   } catch (err) {
     console.error('[Scraper] Polymarket error:', err instanceof Error ? err.message : err);
-    return [];
+    return results;
   }
 }
 
@@ -123,55 +134,62 @@ function kalshiNumber(...candidates: Array<number | string | undefined>): number
   return 0;
 }
 
-export async function scrapeKalshi(limit = 20): Promise<ScrapedExchangeEvent[]> {
-  const url = `https://api.elections.kalshi.com/trade-api/v2/events?limit=${limit}&status=open&with_nested_markets=true`;
+export async function scrapeKalshi(maxMarkets = MAX_MARKETS): Promise<ScrapedExchangeEvent[]> {
+  const results: ScrapedExchangeEvent[] = [];
+  let cursor: string | undefined;
 
   try {
-    const res = await smartFetch(url);
-    if (!res.ok) return [];
+    while (results.length < maxMarkets) {
+      const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const url = `https://api.elections.kalshi.com/trade-api/v2/events?limit=${PAGE_SIZE}&status=open&with_nested_markets=true${cursorParam}`;
+      const res = await smartFetch(url);
+      if (!res.ok) break;
 
-    const data = res.json<{ events?: KalshiEvent[] }>();
-    const events = data?.events ?? [];
-    const results: ScrapedExchangeEvent[] = [];
+      const data = res.json<{ events?: KalshiEvent[]; cursor?: string }>();
+      const events = data?.events ?? [];
+      if (!events.length) break;
 
-    for (const event of events) {
-      for (const market of event.markets) {
-        const yesBid = kalshiPrice(market.yes_bid_dollars, market.yes_bid);
-        const yesAsk = kalshiPrice(market.yes_ask_dollars, market.yes_ask);
-        const noBid = kalshiPrice(market.no_bid_dollars, market.no_bid);
-        const noAsk = kalshiPrice(market.no_ask_dollars, market.no_ask);
-        const last = kalshiPrice(market.last_price_dollars, market.last_price);
+      for (const event of events) {
+        for (const market of event.markets) {
+          const yesBid = kalshiPrice(market.yes_bid_dollars, market.yes_bid);
+          const yesAsk = kalshiPrice(market.yes_ask_dollars, market.yes_ask);
+          const noBid = kalshiPrice(market.no_bid_dollars, market.no_bid);
+          const noAsk = kalshiPrice(market.no_ask_dollars, market.no_ask);
+          const last = kalshiPrice(market.last_price_dollars, market.last_price);
 
-        // Midpoint quotes — fall back to last trade if the book is one-sided or empty.
-        const yesPrice = yesBid && yesAsk ? (yesBid + yesAsk) / 2 : last || yesAsk || yesBid || 0;
-        const noPrice = noBid && noAsk ? (noBid + noAsk) / 2 : (1 - yesPrice) || 0;
+          const yesPrice = yesBid && yesAsk ? (yesBid + yesAsk) / 2 : last || yesAsk || yesBid || 0;
+          const noPrice = noBid && noAsk ? (noBid + noAsk) / 2 : (1 - yesPrice) || 0;
 
-        // Prefer 24h rolling volume; fall back to lifetime volume, then liquidity, then notional.
-        const volume = kalshiNumber(
-          market.volume_24h_fp,
-          market.volume_fp,
-          market.volume,
-          market.liquidity_dollars,
-          market.notional_value_dollars
-        );
+          const volume = kalshiNumber(
+            market.volume_24h_fp,
+            market.volume_fp,
+            market.volume,
+            market.liquidity_dollars,
+            market.notional_value_dollars
+          );
 
-        results.push({
-          id: `kalshi-${market.ticker}`,
-          exchange: 'kalshi',
-          symbol: market.ticker,
-          title: market.title || event.title,
-          price: last || yesPrice,
-          yesPrice,
-          noPrice,
-          volume,
-          endDate: market.close_time,
-          category: event.category,
-          url: `https://kalshi.com/markets/${event.event_ticker}`,
-          timestamp: Date.now(),
-        });
+          results.push({
+            id: `kalshi-${market.ticker}`,
+            exchange: 'kalshi',
+            symbol: market.ticker,
+            title: market.title || event.title,
+            price: last || yesPrice,
+            yesPrice,
+            noPrice,
+            volume,
+            endDate: market.close_time,
+            category: event.category,
+            url: `https://kalshi.com/markets/${event.event_ticker}`,
+            timestamp: Date.now(),
+          });
+          if (results.length >= maxMarkets) break;
+        }
+        if (results.length >= maxMarkets) break;
       }
-    }
 
+      if (!data?.cursor || data.cursor === cursor) break;
+      cursor = data.cursor;
+    }
     return results;
   } catch (err) {
     console.error('[Scraper] Kalshi error:', err instanceof Error ? err.message : err);
@@ -191,23 +209,27 @@ interface BinanceTicker {
   lowPrice: string;
 }
 
-export async function scrapeBinanceTickers(): Promise<ScrapedExchangeEvent[]> {
-  const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT'];
-  const symbolParam = JSON.stringify(symbols);
-  const url = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(symbolParam)}`;
+export async function scrapeBinanceTickers(topN = 50): Promise<ScrapedExchangeEvent[]> {
+  const url = `https://api.binance.com/api/v3/ticker/24hr`;
 
   try {
     const res = await smartFetch(url);
     if (!res.ok) return [];
 
     const tickers = res.json<BinanceTicker[]>();
-    return tickers.map((t): ScrapedExchangeEvent => ({
+    const usdt = tickers
+      .filter((t) => t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN'))
+      .sort((a, b) => parseFloat(b.volume) * parseFloat(b.lastPrice) - parseFloat(a.volume) * parseFloat(a.lastPrice))
+      .slice(0, topN);
+
+    return usdt.map((t): ScrapedExchangeEvent => ({
       id: `binance-${t.symbol}`,
       exchange: 'binance',
       symbol: t.symbol.replace('USDT', ''),
       title: `${t.symbol} 24h Ticker`,
       price: parseFloat(t.lastPrice),
       volume: parseFloat(t.volume),
+      category: 'crypto',
       url: `https://www.binance.com/en/trade/${t.symbol}`,
       timestamp: Date.now(),
     }));
@@ -217,18 +239,183 @@ export async function scrapeBinanceTickers(): Promise<ScrapedExchangeEvent[]> {
   }
 }
 
+// ── Coinbase (public spot tickers) ─────────────────────────────────
+
+interface CoinbaseProduct {
+  id: string;
+  base_currency: string;
+  quote_currency: string;
+  status: string;
+}
+
+interface CoinbaseTicker {
+  price?: string;
+  volume?: string;
+  time?: string;
+}
+
+interface CoinbaseStats {
+  open?: string;
+  high?: string;
+  low?: string;
+  volume?: string;
+  last?: string;
+}
+
+export async function scrapeCoinbase(topN = 20): Promise<ScrapedExchangeEvent[]> {
+  try {
+    const productsRes = await smartFetch('https://api.exchange.coinbase.com/products');
+    if (!productsRes.ok) return [];
+    const products = productsRes.json<CoinbaseProduct[]>()
+      .filter((p) => p.status === 'online' && p.quote_currency === 'USD')
+      .slice(0, topN);
+
+    const results: ScrapedExchangeEvent[] = [];
+    for (const p of products) {
+      try {
+        const statsRes = await smartFetch(`https://api.exchange.coinbase.com/products/${p.id}/stats`);
+        if (!statsRes.ok) continue;
+        const s = statsRes.json<CoinbaseStats>();
+        const price = parseFloat(s.last || '0');
+        if (!price) continue;
+        results.push({
+          id: `coinbase-${p.id}`,
+          exchange: 'coinbase',
+          symbol: p.base_currency,
+          title: `${p.id} 24h`,
+          price,
+          volume: parseFloat(s.volume || '0'),
+          category: 'crypto',
+          url: `https://www.coinbase.com/advanced-trade/${p.id}`,
+          timestamp: Date.now(),
+        });
+      } catch { /* skip */ }
+    }
+    return results;
+  } catch (err) {
+    console.error('[Scraper] Coinbase error:', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+// ── PredictIt (public political event markets) ────────────────────
+
+interface PredictItContract {
+  id: number;
+  name: string;
+  shortName?: string;
+  lastTradePrice?: number;
+  bestBuyYesCost?: number;
+  bestBuyNoCost?: number;
+  bestSellYesCost?: number;
+  bestSellNoCost?: number;
+}
+
+interface PredictItMarket {
+  id: number;
+  name: string;
+  shortName?: string;
+  status?: string;
+  contracts: PredictItContract[];
+  url?: string;
+}
+
+export async function scrapePredictIt(): Promise<ScrapedExchangeEvent[]> {
+  try {
+    const res = await smartFetch('https://www.predictit.org/api/marketdata/all/');
+    if (!res.ok) return [];
+    const data = res.json<{ markets?: PredictItMarket[] }>();
+    const markets = data?.markets ?? [];
+    const results: ScrapedExchangeEvent[] = [];
+
+    for (const market of markets) {
+      if (market.status && market.status !== 'Open') continue;
+      for (const c of market.contracts) {
+        const yesPrice = c.bestBuyYesCost ?? c.lastTradePrice ?? 0;
+        const noPrice = c.bestBuyNoCost ?? (yesPrice ? 1 - yesPrice : 0);
+        if (!yesPrice) continue;
+        results.push({
+          id: `predictit-${c.id}`,
+          exchange: 'predictit',
+          symbol: `PI-${c.id}`,
+          title: `${market.shortName || market.name} — ${c.shortName || c.name}`,
+          price: yesPrice,
+          yesPrice,
+          noPrice,
+          volume: 0,
+          category: 'prediction',
+          url: market.url,
+          timestamp: Date.now(),
+        });
+      }
+    }
+    return results;
+  } catch (err) {
+    console.error('[Scraper] PredictIt error:', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+// ── Manifold (prediction markets, play-money) ─────────────────────
+
+interface ManifoldMarket {
+  id: string;
+  question: string;
+  slug: string;
+  outcomeType?: string;
+  probability?: number;
+  volume24Hours?: number;
+  volume?: number;
+  isResolved?: boolean;
+  closeTime?: number;
+  url?: string;
+}
+
+export async function scrapeManifold(limit = 500): Promise<ScrapedExchangeEvent[]> {
+  try {
+    const res = await smartFetch(`https://api.manifold.markets/v0/markets?limit=${limit}`);
+    if (!res.ok) return [];
+    const markets = res.json<ManifoldMarket[]>() ?? [];
+    return markets
+      .filter((m) => !m.isResolved && m.outcomeType === 'BINARY' && typeof m.probability === 'number')
+      .map((m): ScrapedExchangeEvent => ({
+        id: `manifold-${m.id}`,
+        exchange: 'manifold',
+        symbol: m.slug,
+        title: m.question,
+        price: m.probability ?? 0,
+        yesPrice: m.probability ?? 0,
+        noPrice: 1 - (m.probability ?? 0),
+        volume: m.volume24Hours ?? m.volume ?? 0,
+        endDate: m.closeTime ? new Date(m.closeTime).toISOString() : undefined,
+        category: 'prediction',
+        url: m.url ?? `https://manifold.markets/market/${m.slug}`,
+        timestamp: Date.now(),
+      }));
+  } catch (err) {
+    console.error('[Scraper] Manifold error:', err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 /** Scrape all exchange data */
 export async function scrapeAllExchanges(): Promise<ScrapedExchangeEvent[]> {
-  const [poly, kalshi, binance] = await Promise.allSettled([
+  const [poly, kalshi, binance, coinbase, predictit, manifold] = await Promise.allSettled([
     scrapePolymarket(),
     scrapeKalshi(),
     scrapeBinanceTickers(),
+    scrapeCoinbase(),
+    scrapePredictIt(),
+    scrapeManifold(),
   ]);
 
   const all: ScrapedExchangeEvent[] = [];
   if (poly.status === 'fulfilled') all.push(...poly.value);
   if (kalshi.status === 'fulfilled') all.push(...kalshi.value);
   if (binance.status === 'fulfilled') all.push(...binance.value);
+  if (coinbase.status === 'fulfilled') all.push(...coinbase.value);
+  if (predictit.status === 'fulfilled') all.push(...predictit.value);
+  if (manifold.status === 'fulfilled') all.push(...manifold.value);
 
   return all;
 }

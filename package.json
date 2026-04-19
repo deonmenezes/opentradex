@@ -41,6 +41,7 @@
     "ui": "npm run build:all && node packages/dashboard/dist/server.js",
     "desktop": "cd packages/desktop && npm run dev",
     "test": "tsx --test src/gateway/gateway.test.ts src/gateway/gateway-auth.test.ts src/config.test.ts src/risk.test.ts src/onboard.test.ts src/pair-qr.test.ts packages/desktop/src/secrets.test.ts",
+    "test:live": "tsx --test src/scraper/exchanges.live.test.ts",
     "clean": "rm -rf dist packages/dashboard/dist packages/desktop/dist packages/desktop/release"
   },
   "keywords": [

@@ -924,11 +924,17 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         return json(res, { news: scraper.getNews(limit) });
       }
 
-      // Exchange events (Polymarket, Kalshi, Binance)
+      // Exchange events (Polymarket, Kalshi, Binance, Coinbase, PredictIt, Manifold)
       if (path === '/api/scraper/exchanges') {
         const scraper = getScraperService();
         const exchange = params.get('exchange');
         return json(res, { events: scraper.getExchangeEvents(exchange || undefined) });
+      }
+
+      // Scraper health per exchange — used by dashboard Scraper Health panel (US-010)
+      if (path === '/api/scraper/health') {
+        const scraper = getScraperService();
+        return json(res, { health: scraper.getExchangeHealth() });
       }
 
       // Force refresh all scraped data

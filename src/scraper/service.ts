@@ -162,6 +162,31 @@ export class ScraperService extends EventEmitter {
     };
   }
 
+  /** Per-exchange health report for the dashboard Scraper Health panel (US-010 / FR-4). */
+  getExchangeHealth(): Array<{
+    exchange: string;
+    count: number;
+    validPricePct: number;
+    lastUpdate: number;
+    ageSec: number;
+    status: 'green' | 'yellow' | 'red';
+  }> {
+    const knownExchanges = ['polymarket', 'kalshi', 'binance', 'coinbase', 'predictit', 'manifold'];
+    const now = Date.now();
+    const ageSec = Math.floor((now - this.cache.lastEventUpdate) / 1000);
+
+    return knownExchanges.map((ex) => {
+      const events = this.cache.events.filter((e) => e.exchange === ex);
+      const valid = events.filter((e) => e.price > 0 && Number.isFinite(e.price));
+      const pct = events.length ? (valid.length / events.length) * 100 : 0;
+      let status: 'green' | 'yellow' | 'red' = 'green';
+      if (!events.length) status = 'red';
+      else if (ageSec > 120 || pct < 80) status = 'yellow';
+      if (ageSec > 300 || pct < 50) status = 'red';
+      return { exchange: ex, count: events.length, validPricePct: Math.round(pct), lastUpdate: this.cache.lastEventUpdate, ageSec, status };
+    });
+  }
+
   /** Get the current watchlist */
   getWatchlist(): string[] {
     return [...this.config.watchlist];
