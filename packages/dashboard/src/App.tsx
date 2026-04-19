@@ -4,28 +4,46 @@ import LeftSidebar from './components/LeftSidebar';
 import ChatCockpit from './components/ChatCockpit';
 import RightSidebar from './components/RightSidebar';
 import SetupWizard from './components/SetupWizard';
+import CommandPalette from './components/CommandPalette';
+import ConfirmModal from './components/ConfirmModal';
+import AgentConsole from './components/AgentConsole';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/Resizable';
 import TradesPage from './pages/TradesPage';
 import MarketsPage from './pages/MarketsPage';
 import PaymentsPage from './pages/PaymentsPage';
+import SkillsPage from './pages/SkillsPage';
 import { useHarness } from './hooks/useHarness';
+import { useSkills } from './hooks/useSkills';
+import { renderCommand } from './lib/skills';
+import type { Skill } from './lib/skills';
 import type { Position, Market, FeedItem, Connector } from './lib/types';
 
-type View = 'cockpit' | 'trades' | 'markets' | 'payments';
+type View = 'cockpit' | 'trades' | 'markets' | 'payments' | 'skills';
 
 export default function App() {
   const { status, positions, trades, markets, feed, wsMeta, sendCommand, runCycle, toggleAutoLoop, setLoopInterval, reconnect } = useHarness();
+  const { skills, runs, invoke, recentSkillIds } = useSkills();
   const [selectedChannel, setSelectedChannel] = useState<string>('command');
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Destructive-skill confirmation state (US-008)
+  const [confirmState, setConfirmState] = useState<{
+    skill: Skill;
+    args: Record<string, string | number>;
+    command: string;
+  } | null>(null);
+
   const [view, setView] = useState<View>(() => {
     const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
-    return hash === 'trades' || hash === 'markets' || hash === 'payments' ? (hash as View) : 'cockpit';
+    return hash === 'trades' || hash === 'markets' || hash === 'payments' || hash === 'skills'
+      ? (hash as View)
+      : 'cockpit';
   });
 
-  // On first load: if the user has never dismissed setup AND no AI provider is configured,
-  // auto-open the wizard. Respect a localStorage sentinel so we don't nag on every reload.
+  // On first load: if no AI provider configured and setup never dismissed, auto-open wizard.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (localStorage.getItem('opentradex.setup.dismissed') === '1') return;
@@ -50,12 +68,38 @@ export default function App() {
   useEffect(() => {
     const onHash = () => {
       const h = window.location.hash.replace('#', '');
-      if (h === 'trades' || h === 'markets' || h === 'payments' || h === 'cockpit' || h === '') {
+      if (h === 'trades' || h === 'markets' || h === 'payments' || h === 'skills' || h === 'cockpit' || h === '') {
         setView((h as View) || 'cockpit');
       }
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  // Global keyboard shortcuts (US-013): ⌘K / Ctrl+K opens palette, ⌘/ jumps to Skills,
+  // Shift+? opens help (future). Respect input focus so shortcuts don't fire mid-typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+
+      // ⌘K / Ctrl+K — always captured, even in inputs
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
+      if (inInput) return;
+
+      // g s → Skills page (Vim-style, plus just "s")
+      if (e.key === 's' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setView('skills');
+        window.location.hash = 'skills';
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const toggleLeftSidebar = useCallback(() => {
@@ -68,7 +112,6 @@ export default function App() {
     setLeftSidebarOpen(false);
   }, []);
 
-  // Position action handler
   const handlePositionAction = useCallback(async (action: 'add' | 'reduce' | 'close', position: Position) => {
     const commands: Record<string, string> = {
       add: `add to position ${position.symbol} on ${position.exchange}`,
@@ -78,12 +121,10 @@ export default function App() {
     await sendCommand(commands[action]);
   }, [sendCommand]);
 
-  // Market selection handler
   const handleMarketSelect = useCallback(async (market: Market) => {
     await sendCommand(`analyze ${market.symbol} on ${market.exchange}`);
   }, [sendCommand]);
 
-  // Connector action handler
   const handleConnectorAction = useCallback(async (c: Connector) => {
     if (c.status === 'connected') {
       await sendCommand(`status for ${c.name} connector`);
@@ -92,20 +133,47 @@ export default function App() {
     }
   }, [sendCommand]);
 
-  // Feed action handler
   const handleFeedAction = useCallback(async (action: 'open' | 'save' | 'analyze', item: FeedItem) => {
     if (action === 'analyze') {
       await sendCommand(`analyze news: "${item.title}" from ${item.source}`);
     } else if (action === 'save') {
       console.log('Saved feed item:', item.title);
-      // In production, this would save to a watchlist or bookmarks
     }
-    // 'open' is handled in the component itself by opening the URL
   }, [sendCommand]);
+
+  // Skill invocation pipeline. Destructive → confirm modal, otherwise straight invoke.
+  const handleInvoke = useCallback(
+    (skill: Skill, args: Record<string, string | number>) => invoke(skill, args, false),
+    [invoke]
+  );
+
+  const handleRequestConfirm = useCallback((skill: Skill, args: Record<string, string | number>) => {
+    setConfirmState({ skill, args, command: renderCommand(skill, args) });
+  }, []);
+
+  const handleConfirmExecute = useCallback(async () => {
+    if (!confirmState) return;
+    const { skill, args } = confirmState;
+    setConfirmState(null);
+    await invoke(skill, args, true);
+  }, [confirmState, invoke]);
+
+  const handleConfirmCancel = useCallback(() => setConfirmState(null), []);
+
+  // Replay a past run — re-invoke with saved args (destructive ones still confirm).
+  const handleReplay = useCallback(
+    async (run: { skillId: string; args: Record<string, unknown> }) => {
+      const skill = skills.find((s) => s.id === run.skillId);
+      if (!skill) return;
+      const args = run.args as Record<string, string | number>;
+      if (skill.requiresConfirmation) handleRequestConfirm(skill, args);
+      else await invoke(skill, args, false);
+    },
+    [skills, invoke, handleRequestConfirm]
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col bg-bg overflow-hidden">
-      {/* Top Bar */}
       <TopBar
         status={status}
         wsMeta={wsMeta}
@@ -117,6 +185,8 @@ export default function App() {
         onShowTrades={() => setView('trades')}
         onShowMarkets={() => setView('markets')}
         onShowPayments={() => setView('payments')}
+        onShowSkills={() => setView('skills')}
+        onOpenPalette={() => setPaletteOpen(true)}
         onOpenSetup={handleOpenSetup}
       />
 
@@ -141,13 +211,29 @@ export default function App() {
         </div>
       )}
 
-      {/* Step-by-step mode + API key setup. Auto-opens on first boot, also reachable
-          from the mode badge in the TopBar. */}
       <SetupWizard
         open={setupOpen}
         initialMode={status.mode}
         onClose={handleCloseSetup}
       />
+
+      {/* Agent Command Center — global overlays */}
+      <CommandPalette
+        open={paletteOpen}
+        skills={skills}
+        recentRuns={recentSkillIds}
+        onClose={() => setPaletteOpen(false)}
+        onInvoke={handleInvoke}
+        onRequestConfirm={handleRequestConfirm}
+      />
+      <ConfirmModal
+        open={!!confirmState}
+        skill={confirmState?.skill ?? null}
+        command={confirmState?.command ?? ''}
+        onConfirm={handleConfirmExecute}
+        onCancel={handleConfirmCancel}
+      />
+      <AgentConsole runs={runs} onReplay={handleReplay} />
 
       {view === 'trades' && (
         <TradesPage trades={trades} onBack={() => setView('cockpit')} />
@@ -166,10 +252,18 @@ export default function App() {
         />
       )}
 
-      {/* Main Content */}
+      {view === 'skills' && (
+        <SkillsPage
+          skills={skills}
+          runs={runs}
+          onBack={() => setView('cockpit')}
+          onInvoke={handleInvoke}
+          onRequestConfirm={handleRequestConfirm}
+        />
+      )}
+
       {view === 'cockpit' && (
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Mobile Overlay */}
         {(leftSidebarOpen || rightSidebarOpen) && (
           <div
             className="lg:hidden fixed inset-0 bg-black/50 z-20"
@@ -177,7 +271,6 @@ export default function App() {
           />
         )}
 
-        {/* Mobile: drawer layout */}
         <div className="flex-1 flex overflow-hidden lg:hidden">
           <div className={`
             ${leftSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -212,7 +305,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Desktop: resizable 3-pane layout */}
         <ResizablePanelGroup orientation="horizontal" className="hidden lg:flex flex-1">
           <ResizablePanel defaultSize="22%" minSize="15%" maxSize="40%">
             <LeftSidebar

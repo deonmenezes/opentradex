@@ -17,6 +17,8 @@ import type { Exchange } from '../types.js';
 import { getScraperService } from '../scraper/service.js';
 import { getMemory } from '../ai/memory.js';
 import { routeIntent } from '../ai/intents.js';
+import { SKILLS, getSkill, renderCommand, getAllCategories } from '../agent/skills-registry.js';
+import { recordRun, getRuns, generateRunId } from '../agent/runs-log.js';
 
 // Get the directory of this file to find the dashboard
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -944,6 +946,114 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         const topN = parseInt(params.get('topN') || '10');
         const candidates = aggregateSignals(scraper.getExchangeEvents(), { topN: Math.min(Math.max(topN, 1), 50) });
         return json(res, { candidates });
+      }
+
+      // Agent Command Center: skills registry — enumerate all executable skills
+      if (path === '/api/agent/skills' && req.method === 'GET') {
+        return json(res, { skills: SKILLS, categories: getAllCategories() });
+      }
+
+      // Agent Command Center: audit log of all skill runs
+      if (path === '/api/agent/runs' && req.method === 'GET') {
+        const limit = Math.min(parseInt(params.get('limit') || '50'), 200);
+        const filterRaw = params.get('filter');
+        const filter = filterRaw === 'user' || filterRaw === 'agent' || filterRaw === 'chain' ? filterRaw : undefined;
+        return json(res, { runs: getRuns(limit, filter) });
+      }
+
+      // Agent Command Center: invoke a skill by id
+      // Body: { args: {...}, confirmed?: boolean, source?: 'user'|'agent'|'chain', chainId?: string }
+      if (path.startsWith('/api/agent/skills/') && path.endsWith('/invoke') && req.method === 'POST') {
+        const skillId = path.slice('/api/agent/skills/'.length, -('/invoke'.length));
+        const skill = getSkill(skillId);
+        if (!skill) return error(res, `Unknown skill: ${skillId}`, 404, 'SKILL_NOT_FOUND');
+
+        const body = await readBody(req);
+        const parsed = body ? JSON.parse(body) : {};
+        const skillArgs: Record<string, string | number> = parsed.args ?? {};
+        const confirmed: boolean = parsed.confirmed === true;
+        const source: 'user' | 'agent' | 'chain' = parsed.source === 'agent' || parsed.source === 'chain' ? parsed.source : 'user';
+        const chainId: string | undefined = typeof parsed.chainId === 'string' ? parsed.chainId : undefined;
+
+        const runId = generateRunId();
+        const startedAt = Date.now();
+
+        // Missing-required-arg check
+        const missing = skill.args.filter((a) => a.required && (skillArgs[a.name] === undefined || skillArgs[a.name] === '')).map((a) => a.name);
+        if (missing.length) {
+          const run = {
+            runId, skillId: skill.id, skillName: skill.name, args: skillArgs,
+            command: skill.commandTemplate, source, status: 'failed' as const,
+            output: `Missing required args: ${missing.join(', ')}`,
+            startedAt, durationMs: Date.now() - startedAt, chainId,
+          };
+          recordRun(run);
+          return json(res, { runId, status: 'failed', output: run.output, durationMs: run.durationMs });
+        }
+
+        // Destructive confirmation gate
+        if (skill.destructive && skill.requiresConfirmation && !confirmed) {
+          const run = {
+            runId, skillId: skill.id, skillName: skill.name, args: skillArgs,
+            command: renderCommand(skill, skillArgs), source, status: 'blocked' as const,
+            output: `Confirmation required (word: ${skill.confirmWord ?? skill.id})`,
+            startedAt, durationMs: Date.now() - startedAt, chainId,
+          };
+          recordRun(run);
+          return json(res, { runId, status: 'blocked', reason: 'confirmation_required', confirmWord: skill.confirmWord, output: run.output });
+        }
+
+        // Render and execute
+        const command = renderCommand(skill, skillArgs);
+        let status: 'ok' | 'failed' = 'ok';
+        let output = '';
+        let action: string | null = null;
+        try {
+          // Hardcoded routes for skills that map to gateway endpoints rather than the intent router
+          if (skill.id === 'panic') {
+            const flattened = panicFlatten();
+            output = `PANIC — flattened ${flattened.flattened.length} position(s), realized $${flattened.totalPnL.toFixed(2)}`;
+            action = 'panic';
+            broadcast('positions', { positions: [] });
+          } else if (skill.id === 'autoloop') {
+            const enabled = String(skillArgs.enabled).toLowerCase() === 'on';
+            const minutes = Math.max(1, Number(skillArgs.minutes ?? 5));
+            // Delegate to the existing /api/agent/autoloop endpoint logic by calling harness directly if available
+            const h = harness as unknown as { startAutoLoop?: (m: number) => void; stopAutoLoop?: () => void };
+            if (enabled) h.startAutoLoop?.(minutes);
+            else h.stopAutoLoop?.();
+            output = `Auto-loop ${enabled ? `enabled (every ${minutes}m)` : 'disabled'}`;
+            action = 'autoloop';
+          } else if (skill.id === 'candidates') {
+            const { aggregateSignals } = await import('../agent/strategies/index.js');
+            const scraper = getScraperService();
+            const topN = Math.min(Math.max(Number(skillArgs.topN ?? 10), 1), 50);
+            const candidates = aggregateSignals(scraper.getExchangeEvents(), { topN });
+            output = `Top ${candidates.length} candidates:\n${candidates.map((c, i) => `${i + 1}. ${c.symbol} (${c.exchange}) · score ${c.score} · ${c.side} @ ${c.entryPrice}`).join('\n')}`;
+            action = 'candidates';
+          } else {
+            // Route through the intent router (same path as /api/command)
+            const intent = await routeIntent(command, { harness, broadcast });
+            if (intent) {
+              output = intent.reply;
+              action = intent.action;
+            } else {
+              status = 'failed';
+              output = `Intent router could not execute: "${command}". Check args.`;
+            }
+          }
+        } catch (err) {
+          status = 'failed';
+          output = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+
+        const durationMs = Date.now() - startedAt;
+        recordRun({
+          runId, skillId: skill.id, skillName: skill.name, args: skillArgs,
+          command, source, status, output, startedAt, durationMs, chainId,
+        });
+        broadcast('run', { runId, skillId: skill.id, status, output, durationMs });
+        return json(res, { runId, status, output, action, durationMs });
       }
 
       // Force refresh all scraped data

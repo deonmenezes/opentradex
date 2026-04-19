@@ -12,6 +12,8 @@ interface TopBarProps {
   onShowTrades?: () => void;
   onShowMarkets?: () => void;
   onShowPayments?: () => void;
+  onShowSkills?: () => void;
+  onOpenPalette?: () => void;
   onOpenSetup?: () => void;
 }
 
@@ -27,6 +29,8 @@ export default memo(function TopBar({
   onShowTrades,
   onShowMarkets,
   onShowPayments,
+  onShowSkills,
+  onOpenPalette,
   onOpenSetup
 }: TopBarProps) {
   const [loopMenuOpen, setLoopMenuOpen] = useState(false);
@@ -208,6 +212,33 @@ export default memo(function TopBar({
 
       {/* Right: Controls */}
       <div className="flex items-center gap-2 md:gap-3">
+        {/* Command Palette trigger (⌘K) */}
+        <button
+          onClick={onOpenPalette}
+          data-testid="palette-trigger"
+          title="Open command palette (⌘K)"
+          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-2 border border-border hover:border-accent transition-colors text-xs text-text-dim hover:text-text"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span className="hidden md:inline">Skills</span>
+          <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-bg text-2xs border border-border font-mono">⌘K</kbd>
+        </button>
+
+        {/* Skills page link */}
+        <button
+          onClick={onShowSkills}
+          data-testid="skills-nav"
+          title="Open skills page"
+          className="hidden md:inline-flex p-2 rounded-lg bg-surface-2 hover:bg-card-hover text-text-dim hover:text-accent transition-colors"
+          aria-label="Skills"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+        </button>
+
         {/* Run Cycle - Responsive */}
         <button
           onClick={onRunCycle}
