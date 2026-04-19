@@ -1,10 +1,18 @@
 import { useState, useMemo, memo, useCallback } from 'react';
 import type { FeedItem } from '../lib/types';
+import type { Skill, SkillRun, InvokeResult } from '../lib/skills';
+import ProactiveSuggestions from './ProactiveSuggestions';
+import RunsAuditPanel from './RunsAuditPanel';
+import FlowVisualizer from './FlowVisualizer';
 
 interface RightSidebarProps {
   feed: FeedItem[];
   onClose?: () => void;
   onFeedAction?: (action: 'open' | 'save' | 'analyze', item: FeedItem) => void;
+  skills?: Skill[];
+  runs?: SkillRun[];
+  onInvoke?: (skill: Skill, args: Record<string, string | number>) => Promise<InvokeResult | null>;
+  onRequestConfirm?: (skill: Skill, args: Record<string, string | number>) => void;
 }
 
 const sourceIcons: Record<string, { icon: string; color: string; fullName: string }> = {
@@ -35,7 +43,15 @@ const feedTabs = [
   { id: 'social', label: 'Social', icon: 'M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z' },
 ];
 
-export default memo(function RightSidebar({ feed, onClose, onFeedAction }: RightSidebarProps) {
+export default memo(function RightSidebar({
+  feed,
+  onClose,
+  onFeedAction,
+  skills = [],
+  runs = [],
+  onInvoke,
+  onRequestConfirm,
+}: RightSidebarProps) {
   const [activeTab, setActiveTab] = useState('all');
   const [readItems, setReadItems] = useState<Set<string>>(new Set());
 
@@ -122,6 +138,24 @@ export default memo(function RightSidebar({ feed, onClose, onFeedAction }: Right
           <p className="text-xs text-text-dim">Ask questions, share setups, and follow product updates with the operator crew.</p>
         </button>
       </div>
+
+      {/* Agent command center: suggestions + flow graph + audit log */}
+      {onInvoke && onRequestConfirm && skills.length > 0 && (
+        <>
+          <ProactiveSuggestions
+            skills={skills}
+            onInvoke={onInvoke}
+            onRequestConfirm={onRequestConfirm}
+          />
+          <FlowVisualizer
+            skills={skills}
+            runs={runs}
+            onInvoke={onInvoke}
+            onRequestConfirm={onRequestConfirm}
+          />
+        </>
+      )}
+      {runs.length > 0 && <RunsAuditPanel runs={runs} />}
 
       {/* Feed Tabs - Functional */}
       <div className="px-3 py-2 flex items-center gap-1 border-b border-border">

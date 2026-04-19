@@ -1,9 +1,13 @@
 import { useState, useEffect, memo } from 'react';
 import type { HarnessStatus, WsMeta } from '../lib/types';
+import type { AgentContext } from '../hooks/useAgentContext';
+import HarnessStatusBadges from './HarnessStatusBadges';
 
 interface TopBarProps {
   status: HarnessStatus;
   wsMeta?: WsMeta;
+  agentContext?: AgentContext | null;
+  activeRunCount?: number;
   onRunCycle?: () => void;
   onToggleAutoLoop?: () => void;
   onSetLoopInterval?: (minutes: number) => void;
@@ -21,6 +25,8 @@ interface TopBarProps {
 export default memo(function TopBar({
   status,
   wsMeta,
+  agentContext,
+  activeRunCount = 0,
   onRunCycle,
   onToggleAutoLoop,
   onSetLoopInterval,
@@ -212,6 +218,9 @@ export default memo(function TopBar({
 
       {/* Right: Controls */}
       <div className="flex items-center gap-2 md:gap-3">
+        {/* Harness health badges (scraper/halt/active-runs) */}
+        <HarnessStatusBadges context={agentContext ?? null} activeRunCount={activeRunCount} />
+
         {/* Command Palette trigger (⌘K) */}
         <button
           onClick={onOpenPalette}

@@ -14,6 +14,7 @@ import PaymentsPage from './pages/PaymentsPage';
 import SkillsPage from './pages/SkillsPage';
 import { useHarness } from './hooks/useHarness';
 import { useSkills } from './hooks/useSkills';
+import { useAgentContext } from './hooks/useAgentContext';
 import { renderCommand } from './lib/skills';
 import type { Skill } from './lib/skills';
 import type { Position, Market, FeedItem, Connector } from './lib/types';
@@ -23,6 +24,12 @@ type View = 'cockpit' | 'trades' | 'markets' | 'payments' | 'skills';
 export default function App() {
   const { status, positions, trades, markets, feed, wsMeta, sendCommand, runCycle, toggleAutoLoop, setLoopInterval, reconnect } = useHarness();
   const { skills, runs, invoke, recentSkillIds } = useSkills();
+  const { context: agentContext } = useAgentContext();
+
+  // Active run count = runs started in the last 5s and still running (status === 'ok' with very recent startedAt).
+  // Since the harness runs skills synchronously and writes the entry after completion,
+  // "active" here means "recently fired" — useful enough for the header badge.
+  const activeRunCount = runs.filter((r) => Date.now() - r.startedAt < 5000).length;
   const [selectedChannel, setSelectedChannel] = useState<string>('command');
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
@@ -177,6 +184,8 @@ export default function App() {
       <TopBar
         status={status}
         wsMeta={wsMeta}
+        agentContext={agentContext}
+        activeRunCount={activeRunCount}
         onRunCycle={runCycle}
         onToggleAutoLoop={toggleAutoLoop}
         onSetLoopInterval={setLoopInterval}
@@ -301,6 +310,10 @@ export default function App() {
               feed={feed}
               onClose={() => setRightSidebarOpen(false)}
               onFeedAction={handleFeedAction}
+              skills={skills}
+              runs={runs}
+              onInvoke={handleInvoke}
+              onRequestConfirm={handleRequestConfirm}
             />
           </div>
         </div>
@@ -329,6 +342,10 @@ export default function App() {
             <RightSidebar
               feed={feed}
               onFeedAction={handleFeedAction}
+              skills={skills}
+              runs={runs}
+              onInvoke={handleInvoke}
+              onRequestConfirm={handleRequestConfirm}
             />
           </ResizablePanel>
         </ResizablePanelGroup>

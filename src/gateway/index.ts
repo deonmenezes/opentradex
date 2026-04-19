@@ -1056,6 +1056,115 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         return json(res, { runId, status, output, action, durationMs });
       }
 
+      // Agent Command Center: live dashboard snapshot the agent can read before acting.
+      // Gives the LLM (and UI flow visualizer) a single JSON view of harness state:
+      // mode, risk, open positions, connectors, recent activity, enabled rails.
+      if (path === '/api/agent/context' && req.method === 'GET') {
+        const risk = getRiskState();
+        const scraper = getScraperService();
+        const health = scraper.getExchangeHealth();
+        const lastRuns = getRuns(10);
+        const modeLock = readModeLock();
+        return json(res, {
+          mode: config.mode,
+          modeLock,
+          tradingHalted: isTradingHalted(),
+          risk: {
+            equity: getEquity(),
+            dailyPnL: risk.dailyPnL,
+            openPositions: risk.openPositions.length,
+            dailyTrades: risk.dailyTrades,
+          },
+          positions: risk.openPositions,
+          scraperHealth: health.map((h) => ({
+            name: h.exchange,
+            ok: h.status !== 'red',
+            status: h.status,
+            count: h.count,
+            ageSec: h.ageSec,
+            lastUpdate: h.lastUpdate,
+          })),
+          rails: (config.exchanges || []) as string[],
+          recentRuns: lastRuns,
+          skills: SKILLS.map((s) => ({
+            id: s.id,
+            name: s.name,
+            category: s.category,
+            destructive: s.destructive,
+          })),
+          aiProviders: listSavedProviders(),
+          timestamp: Date.now(),
+        });
+      }
+
+      // Agent Command Center: proactive suggestions based on current state.
+      // Returns up to 5 ranked skill suggestions with reasoning. Surfaced in the UI
+      // so the user sees "Top of mind: review panic if daily drawdown > X".
+      if (path === '/api/agent/suggest' && req.method === 'GET') {
+        const risk = getRiskState();
+        const scraper = getScraperService();
+        const health = scraper.getExchangeHealth();
+        const suggestions: Array<{ skillId: string; reason: string; priority: 'high' | 'normal' | 'low' }> = [];
+
+        // Dead scrapers? Surface risk check before trading
+        const deadScrapers = health.filter((e) => e.status === 'red');
+        if (deadScrapers.length > 0) {
+          suggestions.push({
+            skillId: 'risk',
+            reason: `${deadScrapers.length} scraper(s) offline: ${deadScrapers.map((e) => e.exchange).join(', ')}. Check risk state first.`,
+            priority: 'high',
+          });
+        }
+
+        // No positions yet? Nudge toward scanning
+        if (risk.openPositions.length === 0) {
+          suggestions.push({
+            skillId: 'candidates',
+            reason: 'No open positions. Run ranked candidates to find cross-venue edges.',
+            priority: 'normal',
+          });
+        }
+
+        // Drawdown — surface panic as an option (not executed, just visible)
+        if (risk.dailyPnL < -500) {
+          suggestions.push({
+            skillId: 'panic',
+            reason: `Daily P&L is $${risk.dailyPnL.toFixed(2)}. Panic-flatten is available if drawdown continues.`,
+            priority: 'high',
+          });
+        }
+
+        // Many open positions? Suggest inspect
+        if (risk.openPositions.length >= 3) {
+          suggestions.push({
+            skillId: 'positions',
+            reason: `${risk.openPositions.length} open positions. Review each for profit-taking.`,
+            priority: 'normal',
+          });
+        }
+
+        // No AI provider? Suggest onboard
+        const providers = listSavedProviders();
+        if (providers.length === 0) {
+          suggestions.push({
+            skillId: 'onboard',
+            reason: 'No AI provider configured. Run onboarding to enable LLM-backed analysis.',
+            priority: 'high',
+          });
+        }
+
+        // Always include "scan" as default exploration
+        if (suggestions.length < 3) {
+          suggestions.push({
+            skillId: 'scan',
+            reason: 'Scan live markets for ranked opportunities.',
+            priority: 'low',
+          });
+        }
+
+        return json(res, { suggestions: suggestions.slice(0, 5), timestamp: Date.now() });
+      }
+
       // Force refresh all scraped data
       if ((path === '/api/scraper/refresh') && req.method === 'POST') {
         const scraper = getScraperService();
