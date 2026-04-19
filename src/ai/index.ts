@@ -8,7 +8,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { loadConfig } from '../config.js';
-import { getRiskState } from '../risk.js';
+import { getRiskState, isTradingHalted, getEquity } from '../risk.js';
+import { getRuns } from '../agent/runs-log.js';
 import type { AIProvider, AIMessage, ChatOptions, TaskRole } from './providers/types.js';
 import {
   configuredProviders,
@@ -135,12 +136,32 @@ class OpenTradexAI {
   }
 
   private buildContext(): string {
+    if (process.env.OPENTRADEX_DISABLE_CONTEXT_INJECT === '1') return '';
     const config = loadConfig();
     const risk = getRiskState();
-    return `
-## Current Trading Context
+    const halt = isTradingHalted();
+    const rails = Object.entries(config?.rails || {})
+      .filter(([_, v]) => v.enabled)
+      .map(([k]) => k);
 
-**Mode:** ${config?.tradingMode || 'paper-only'}
+    // Recent skill runs from the dashboard Command Center — gives the LLM
+    // awareness of what the user/agent just did so it can reference it.
+    let recentRuns = '';
+    try {
+      const runs = getRuns().slice(0, 5);
+      if (runs.length > 0) {
+        recentRuns = '\n**Recent skill runs (newest first):**\n' +
+          runs.map((r) => `- ${r.skillId} · ${r.status} · ${new Date(r.startedAt).toLocaleTimeString()}`).join('\n');
+      }
+    } catch {
+      // runs log unavailable — don't block the prompt
+    }
+
+    return `
+## Current Dashboard Context
+
+**Mode:** ${config?.tradingMode || 'paper-only'}${halt.halted ? ` · HALTED (${halt.reason || 'unknown'})` : ''}
+**Equity:** $${getEquity().toFixed(2)}
 **Daily P&L:** $${risk.dailyPnL.toFixed(2)}
 **Open Positions:** ${risk.openPositions.length}
 **Trades Today:** ${risk.dailyTrades}
@@ -150,10 +171,7 @@ class OpenTradexAI {
 - Max Daily Loss: $${config?.risk?.maxDailyLossUsd || 500}
 - Max Drawdown: ${(config?.risk?.dailyDDKill || 10)}%
 
-**Available Exchanges:** ${Object.entries(config?.rails || {})
-      .filter(([_, v]) => v.enabled)
-      .map(([k]) => k)
-      .join(', ') || 'None configured'}
+**Available Rails:** ${rails.length ? rails.join(', ') : 'None configured'}${recentRuns}
 `;
   }
 

@@ -7,6 +7,8 @@ import SetupWizard from './components/SetupWizard';
 import CommandPalette from './components/CommandPalette';
 import ConfirmModal from './components/ConfirmModal';
 import AgentConsole from './components/AgentConsole';
+import ChainBuilder from './components/ChainBuilder';
+import ShortcutsHelp from './components/ShortcutsHelp';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/Resizable';
 import TradesPage from './pages/TradesPage';
 import MarketsPage from './pages/MarketsPage';
@@ -35,6 +37,8 @@ export default function App() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [chainOpen, setChainOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Destructive-skill confirmation state (US-008)
   const [confirmState, setConfirmState] = useState<{
@@ -83,9 +87,18 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // Global keyboard shortcuts (US-013): ⌘K / Ctrl+K opens palette, ⌘/ jumps to Skills,
-  // Shift+? opens help (future). Respect input focus so shortcuts don't fire mid-typing.
+  // Global keyboard shortcuts (US-013). Two-key Vim-style bigrams ('g s', 'g r', 'g p')
+  // plus single-key actions ('/', '!', '?'). Respects input focus so shortcuts never
+  // fire while the user is typing into the chat/arg inputs.
   useEffect(() => {
+    let gPressed = false;
+    let gTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearG = () => {
+      gPressed = false;
+      if (gTimer) { clearTimeout(gTimer); gTimer = null; }
+    };
+
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
@@ -98,16 +111,65 @@ export default function App() {
       }
       if (inInput) return;
 
-      // g s → Skills page (Vim-style, plus just "s")
-      if (e.key === 's' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // / → focus chat input
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        const chatInput = document.querySelector<HTMLInputElement>('[data-testid="command-input"]');
+        chatInput?.focus();
+        return;
+      }
+
+      // ! → open palette pre-filled with "panic" (fastest panic access with confirm step)
+      if (e.key === '!' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        const panicSkill = skills.find((s) => s.id === 'panic');
+        if (panicSkill) handleRequestConfirm(panicSkill, {});
+        return;
+      }
+
+      // ? → open shortcuts help overlay
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
+
+      // c → open chain builder
+      if (e.key === 'c' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !gPressed) {
+        e.preventDefault();
+        setChainOpen((v) => !v);
+        return;
+      }
+
+      // Two-key bigrams: g then {s/r/p/m/t}
+      if (e.key === 'g' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        gPressed = true;
+        if (gTimer) clearTimeout(gTimer);
+        gTimer = setTimeout(clearG, 1000);
+        return;
+      }
+      if (gPressed) {
+        const key = e.key.toLowerCase();
+        clearG();
+        if (key === 's') { setView('skills'); window.location.hash = 'skills'; e.preventDefault(); return; }
+        if (key === 'r') { invoke(skills.find((s) => s.id === 'risk')!, {}, false); e.preventDefault(); return; }
+        if (key === 'p') { invoke(skills.find((s) => s.id === 'positions')!, {}, false); e.preventDefault(); return; }
+        if (key === 'm') { setView('markets'); window.location.hash = 'markets'; e.preventDefault(); return; }
+        if (key === 't') { setView('trades'); window.location.hash = 'trades'; e.preventDefault(); return; }
+      }
+
+      // Single-press 's' → Skills page (kept for backward compat with previous binding)
+      if (e.key === 's' && !e.metaKey && !e.ctrlKey && !e.altKey && !gPressed) {
         e.preventDefault();
         setView('skills');
         window.location.hash = 'skills';
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    return () => { window.removeEventListener('keydown', onKey); clearG(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skills]);
 
   const toggleLeftSidebar = useCallback(() => {
     setLeftSidebarOpen(prev => !prev);
@@ -197,6 +259,8 @@ export default function App() {
         onShowSkills={() => setView('skills')}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSetup={handleOpenSetup}
+        onOpenChain={() => setChainOpen(true)}
+        onOpenHelp={() => setShortcutsOpen(true)}
       />
 
       {status.connection === 'disconnected' && (
@@ -243,6 +307,8 @@ export default function App() {
         onCancel={handleConfirmCancel}
       />
       <AgentConsole runs={runs} onReplay={handleReplay} />
+      {chainOpen && <ChainBuilder skills={skills} onClose={() => setChainOpen(false)} />}
+      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {view === 'trades' && (
         <TradesPage trades={trades} onBack={() => setView('cockpit')} />

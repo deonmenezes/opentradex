@@ -1065,8 +1065,12 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         const health = scraper.getExchangeHealth();
         const lastRuns = getRuns(10);
         const modeLock = readModeLock();
+        const appConfigCtx = loadConfig();
+        const enabledRails = appConfigCtx?.rails
+          ? Object.entries(appConfigCtx.rails).filter(([, v]) => v.enabled).map(([k]) => k)
+          : [];
         return json(res, {
-          mode: config.mode,
+          mode: appConfigCtx?.tradingMode || 'paper-only',
           modeLock,
           tradingHalted: isTradingHalted(),
           risk: {
@@ -1084,7 +1088,7 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
             ageSec: h.ageSec,
             lastUpdate: h.lastUpdate,
           })),
-          rails: (config.exchanges || []) as string[],
+          rails: enabledRails,
           recentRuns: lastRuns,
           skills: SKILLS.map((s) => ({
             id: s.id,
@@ -1163,6 +1167,134 @@ export function createGateway(harness: OpenTradex, config: GatewayConfig = {}) {
         }
 
         return json(res, { suggestions: suggestions.slice(0, 5), timestamp: Date.now() });
+      }
+
+      // Agent Command Center: run a chain of skills sequentially (US-009).
+      // Body: { steps: Array<{ skillId, args, confirmed?: boolean }>, dryRun?: boolean }
+      // Response: { chainId, steps: Array<{skillId, status, output, runId?}> }
+      // A chain aborts at the first `failed` or `blocked` step. Destructive skills
+      // must be pre-confirmed by passing confirmed:true on each step.
+      if (path === '/api/agent/chains/run' && req.method === 'POST') {
+        const body = await readBody(req);
+        const parsed = body ? JSON.parse(body) : {};
+        const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+        const dryRun = parsed.dryRun === true;
+        if (steps.length === 0) return error(res, 'steps array required', 400);
+        if (steps.length > 6) return error(res, 'max 6 steps per chain', 400);
+
+        const chainId = `chain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const results: Array<{ skillId: string; status: string; output: string; runId?: string; args: Record<string, unknown> }> = [];
+        let previousOutput = '';
+
+        broadcast('chain:start', { chainId, stepCount: steps.length });
+
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i];
+          const skill = getSkill(step.skillId);
+          if (!skill) {
+            results.push({ skillId: step.skillId, status: 'failed', output: `Unknown skill: ${step.skillId}`, args: step.args ?? {} });
+            broadcast('chain:step', { chainId, index: i, skillId: step.skillId, status: 'failed' });
+            break;
+          }
+
+          // Resolve template tokens: {previous.output} → last step's output
+          const resolvedArgs: Record<string, string | number> = {};
+          for (const [k, v] of Object.entries(step.args ?? {})) {
+            if (typeof v === 'string' && v.includes('{previous.output}')) {
+              resolvedArgs[k] = v.replace(/\{previous\.output\}/g, previousOutput.slice(0, 200));
+            } else {
+              resolvedArgs[k] = v as string | number;
+            }
+          }
+
+          broadcast('chain:step:start', { chainId, index: i, skillId: skill.id, args: resolvedArgs });
+
+          if (dryRun) {
+            results.push({
+              skillId: skill.id,
+              status: 'dry-run',
+              output: `[dry] would run: ${renderCommand(skill, resolvedArgs)}`,
+              args: resolvedArgs,
+            });
+            broadcast('chain:step', { chainId, index: i, skillId: skill.id, status: 'dry-run' });
+            continue;
+          }
+
+          // Destructive gate — honour confirmation per step
+          const confirmed = step.confirmed === true;
+          if (skill.destructive && skill.requiresConfirmation && !confirmed) {
+            const runId = generateRunId();
+            const output = `Confirmation required (word: ${skill.confirmWord ?? skill.id})`;
+            recordRun({
+              runId, skillId: skill.id, skillName: skill.name, args: resolvedArgs,
+              command: renderCommand(skill, resolvedArgs), source: 'chain',
+              status: 'blocked', output, startedAt: Date.now(), durationMs: 0, chainId,
+            });
+            results.push({ skillId: skill.id, status: 'blocked', output, runId, args: resolvedArgs });
+            broadcast('chain:step', { chainId, index: i, skillId: skill.id, status: 'blocked' });
+            break;
+          }
+
+          // Missing-required-arg check
+          const missing = skill.args.filter((a) => a.required && (resolvedArgs[a.name] === undefined || resolvedArgs[a.name] === '')).map((a) => a.name);
+          if (missing.length) {
+            const runId = generateRunId();
+            const output = `Missing required args: ${missing.join(', ')}`;
+            recordRun({
+              runId, skillId: skill.id, skillName: skill.name, args: resolvedArgs,
+              command: skill.commandTemplate, source: 'chain',
+              status: 'failed', output, startedAt: Date.now(), durationMs: 0, chainId,
+            });
+            results.push({ skillId: skill.id, status: 'failed', output, runId, args: resolvedArgs });
+            broadcast('chain:step', { chainId, index: i, skillId: skill.id, status: 'failed' });
+            break;
+          }
+
+          // Execute via same path as invoke endpoint
+          const command = renderCommand(skill, resolvedArgs);
+          const runId = generateRunId();
+          const startedAt = Date.now();
+          let status: 'ok' | 'failed' = 'ok';
+          let output = '';
+          try {
+            if (skill.id === 'panic') {
+              const flattened = panicFlatten();
+              output = `PANIC — flattened ${flattened.flattened.length} position(s), realized $${flattened.totalPnL.toFixed(2)}`;
+              broadcast('positions', { positions: [] });
+            } else if (skill.id === 'candidates') {
+              const { aggregateSignals } = await import('../agent/strategies/index.js');
+              const scraper = getScraperService();
+              const topN = Math.min(Math.max(Number(resolvedArgs.topN ?? 10), 1), 50);
+              const candidates = aggregateSignals(scraper.getExchangeEvents(), { topN });
+              output = `Top ${candidates.length} candidates:\n${candidates.map((c, idx) => `${idx + 1}. ${c.symbol} (${c.exchange}) · score ${c.score}`).join('\n')}`;
+            } else {
+              const intent = await routeIntent(command, { harness, broadcast });
+              if (intent) {
+                output = intent.reply;
+              } else {
+                status = 'failed';
+                output = `Intent router could not execute: "${command}"`;
+              }
+            }
+          } catch (err) {
+            status = 'failed';
+            output = `Error: ${err instanceof Error ? err.message : String(err)}`;
+          }
+
+          const durationMs = Date.now() - startedAt;
+          recordRun({
+            runId, skillId: skill.id, skillName: skill.name, args: resolvedArgs,
+            command, source: 'chain', status, output, startedAt, durationMs, chainId,
+          });
+          results.push({ skillId: skill.id, status, output, runId, args: resolvedArgs });
+          broadcast('chain:step', { chainId, index: i, skillId: skill.id, status });
+          previousOutput = output;
+
+          if (status === 'failed') break;
+        }
+
+        broadcast('chain:complete', { chainId, stepsRun: results.length });
+        return json(res, { chainId, steps: results, dryRun });
       }
 
       // Force refresh all scraped data

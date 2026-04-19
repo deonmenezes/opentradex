@@ -118,10 +118,63 @@ test('dashboard bundle includes all agent command center components', async () =
     'command-palette','confirm-modal','agent-console-pill','skills-page',
     'flow-visualizer','flow-node-','suggestions','audit-panel',
     'harness-status','palette-trigger','skills-nav','scraper-badge','active-runs-badge',
+    'chain-builder','chain-trigger','chain-run','chain-dryrun','shortcuts-help','help-trigger',
   ];
   for (const n of needles) {
     assert(js.includes(n), `bundle includes testid ${n}`);
   }
+});
+
+test('chain dry-run returns dry-run status per step', async () => {
+  const r = await post('/api/agent/chains/run', {
+    dryRun: true,
+    steps: [
+      { skillId: 'risk', args: {} },
+      { skillId: 'positions', args: {} },
+    ],
+  });
+  assert(r.ok, `HTTP ${r.status}`);
+  assert(typeof r.data.chainId === 'string' && r.data.chainId.startsWith('chain-'), 'chainId prefixed');
+  assert(Array.isArray(r.data.steps) && r.data.steps.length === 2, 'two steps returned');
+  for (const s of r.data.steps) assert(s.status === 'dry-run', `step ${s.skillId} dry-run got ${s.status}`);
+  assert(r.data.dryRun === true, 'dryRun echoed');
+});
+
+test('chain executes safe steps sequentially', async () => {
+  const r = await post('/api/agent/chains/run', {
+    steps: [
+      { skillId: 'risk', args: {} },
+      { skillId: 'positions', args: {} },
+    ],
+  });
+  assert(r.ok, `HTTP ${r.status}`);
+  assert(r.data.steps.length === 2, 'two steps ran');
+  for (const s of r.data.steps) {
+    assert(s.status === 'ok', `step ${s.skillId} ok got ${s.status}`);
+    assert(typeof s.runId === 'string', `step ${s.skillId} runId assigned`);
+    assert(typeof s.output === 'string' && s.output.length > 0, `step ${s.skillId} output`);
+  }
+});
+
+test('chain blocks on destructive step without confirmed=true', async () => {
+  const r = await post('/api/agent/chains/run', {
+    steps: [
+      { skillId: 'risk', args: {} },
+      { skillId: 'panic', args: {} },
+    ],
+  });
+  assert(r.ok, `HTTP ${r.status}`);
+  assert(r.data.steps.length === 2, 'runs until the blocked step');
+  assert(r.data.steps[0].status === 'ok', 'safe step completes first');
+  assert(r.data.steps[1].status === 'blocked', `panic blocked got ${r.data.steps[1].status}`);
+});
+
+test('chain runs in audit log and tagged with chainId', async () => {
+  const d = await get('/api/agent/runs');
+  const chainRuns = d.runs.filter((r) => r.source === 'chain');
+  assert(chainRuns.length >= 2, `≥2 chain runs in audit (got ${chainRuns.length})`);
+  const chainIds = new Set(chainRuns.map((r) => r.chainId));
+  assert(chainIds.size >= 1, 'at least one chainId bucket');
 });
 
 // Run ----
