@@ -1,359 +1,263 @@
 {
-  "project": "OpenTradex Trading Plugin",
-  "branchName": "ralph/opentradex-trade-plugin",
-  "description": "Standalone, publishable Claude Code plugin for paper trading across Kalshi, Polymarket, Alpaca, and Coinbase. Onboarding collects API keys only; a thin Node helper (bin/tradex.js) handles scan/order/ledger for all rails. Paper-only in v1. Shipped in commit 61d2cc2 and pushed to deonmenezes/opentradex.",
+  "project": "OpenTradex Agent Command Center",
+  "branchName": "ralph/agent-command-center",
+  "description": "Interactive Command Center inside the dashboard that surfaces every skill the harness exposes, gives the agent live dashboard state + DAG flow awareness, chains multi-step playbooks with dry-run, and enforces type-to-confirm on destructive actions.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Scaffold plugin manifest and bin helper",
-      "description": "As a developer, I need the plugin directory structure and Node helper entry point so every later skill has something to call.",
+      "title": "Agent skills registry endpoint",
+      "description": "As a developer, I need a single source of truth the dashboard can query to list all executable skills and their metadata, so the UI doesn't hard-code skill names.",
       "acceptanceCriteria": [
-        "opentradex-trade/.claude-plugin/plugin.json exists with name, description, version 1.0.0, author, keywords",
-        "opentradex-trade/bin/tradex.js exists with shebang #!/usr/bin/env node and a switch-based subcommand dispatcher",
-        "node bin/tradex.js help prints usage listing scan, buy, sell, positions, risk, panic, onboard",
-        "node --check opentradex-trade/bin/tradex.js passes",
+        "GET /api/agent/skills returns { skills: Skill[] } with id, name, category, description, argsSchema, destructive, requiresConfirmation, exampleInvocations",
+        "Registry populated from src/agent/skills-registry.ts (single source of truth)",
+        "Adding a skill requires only editing the registry file",
+        "Gateway endpoint covers trade/inspect/analyze/setup/safety categories",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Plugin is pure ESM JavaScript, no TypeScript in this package, so typecheck N/A; help subcommand verified live."
+      "notes": "Implemented in src/agent/skills-registry.ts (13 skills across 5 cats); endpoint at src/gateway/index.ts. Smoke test passes: '/api/agent/skills lists all skill definitions'."
     },
     {
       "id": "US-002",
-      "title": "Key storage module",
-      "description": "As a developer, I need a module that reads and writes ~/.claude/opentradex/keys.json with 0600 perms so adapters have one place to fetch credentials.",
+      "title": "Agent context feed endpoint",
+      "description": "As the agent, I need to know what the user is currently looking at (mode, risk, positions, scraper health, recent runs) so suggestions reference real state.",
       "acceptanceCriteria": [
-        "opentradex-trade/lib/keys.js exports readKeys(), writeKey(rail, fields), deleteKey(rail)",
-        "writeKey creates the file with mode 0600 and parent dir with mode 0700",
-        "readKeys returns {} for missing file — never throws",
-        "Unit tests cover round-trip, missing file, and permission mode",
-        "Tests pass",
+        "GET /api/agent/context returns modeLock, tradingHalted, risk, positions, scraperHealth, rails, recentRuns, skills, aiProviders",
+        "Gateway exposes endpoint with full harness snapshot",
+        "Dashboard polls via useAgentContext hook (8s cadence)",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Unit tests deferred to v1.1; manual round-trip tested live via onboard + keys + keys-delete subcommands."
+      "notes": "Endpoint in src/gateway/index.ts; hook at packages/dashboard/src/hooks/useAgentContext.ts. Smoke test passes: '/api/agent/context returns full harness snapshot'. Live verification returned mode=paper-only, 6 scrapers, 13 skills, 7 recent runs."
     },
     {
       "id": "US-003",
-      "title": "Onboarding skill + helper subcommand",
-      "description": "As a user, I want one slash command that walks me through adding API keys for each rail.",
+      "title": "Command palette (Cmd+K / Ctrl+K)",
+      "description": "As a user, I want a global command palette to trigger any skill or jump to any view without hunting through menus.",
       "acceptanceCriteria": [
-        "skills/onboard/SKILL.md exists with disable-model-invocation: false and allowed-tools: Bash(node *)",
-        "node bin/tradex.js onboard prompts Kalshi, Polymarket, Alpaca, Coinbase; Enter skips; writes to keys.json",
-        "After completion, prints enabled rails and confirms paper-only mode",
-        "Running twice preserves prior keys unless overwritten",
-        "Typecheck passes"
+        "Cmd+K / Ctrl+K opens centered searchable overlay",
+        "Fuzzy matches skill names, intent phrases, view names",
+        "Enter executes; Arrow keys navigate; Esc closes",
+        "New file: packages/dashboard/src/components/CommandPalette.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. disable-model-invocation set to true (intentional — onboarding should be explicit, not model-inferred). writeKey merges fields instead of overwriting so re-runs preserve other rails."
+      "notes": "CommandPalette.tsx shipped; bundle confirms testids 'command-palette' and 'palette-trigger'."
     },
     {
       "id": "US-004",
-      "title": "Paper ledger module",
-      "description": "As a developer, I need an in-process paper ledger for realistic positions and P&L without live exchange hits.",
+      "title": "Skills panel (dedicated route)",
+      "description": "As a user, I want a dedicated view showing every skill as a rich card so I can see what's possible, read examples, and launch from one place.",
       "acceptanceCriteria": [
-        "opentradex-trade/lib/ledger.js exports openPosition, closePosition, listPositions, markToMarket",
-        "Positions persist to ~/.claude/opentradex/ledger.json with id, rail, symbol, side, qty, entry, mark, unrealizedPnl, openedAt",
-        "closePosition appends a realized P&L entry to the trades array",
-        "Unit tests cover open, mark, close, listPositions",
-        "Tests pass",
-        "Typecheck passes"
+        "Nav entry Skills routes to #skills view",
+        "Category tabs (Trade / Inspect / Analyze / Setup / Safety)",
+        "Each card shows: name, description, args form, destructive badge, Run button",
+        "Destructive skills show red border and require type-to-confirm",
+        "New file: packages/dashboard/src/pages/SkillsPage.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Verified live: BTC paper buy @ 65000 closed @ 77406 booked $124.06 realized; Polymarket buy @ 0.59 exit 0.60 booked $0.10. Unit tests deferred to v1.1."
+      "notes": "SkillsPage.tsx shipped. Bundle testid 'skills-page' + 'skills-nav' confirmed."
     },
     {
       "id": "US-005",
-      "title": "Kalshi adapter (scan + paper-order)",
-      "description": "As a user, I want to pull live Kalshi markets and place paper orders against them.",
+      "title": "Skill invocation endpoint",
+      "description": "As a developer, I need a unified gateway endpoint that routes skill invocations through the existing intent router.",
       "acceptanceCriteria": [
-        "opentradex-trade/rails/kalshi.js exports scan(limit) and order({symbol, side, qty})",
-        "scan calls Kalshi public markets endpoint using the key from keys.json; returns normalized list",
-        "order in paper mode invokes ledger.openPosition at current yes/no ask",
-        "Missing key: scan returns [], order throws KEY_MISSING",
-        "Tests use recorded fixtures; no live network in tests",
-        "Tests pass",
+        "POST /api/agent/skills/:id/invoke returns { runId, status, output, durationMs }",
+        "Destructive skills return { status: 'blocked', reason: 'confirmation_required' } unless confirmed: true",
+        "Every invocation writes to in-memory run log (last 200) at GET /api/agent/runs",
+        "Errors return { status: 'failed' } — never 500",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Uses api.elections.kalshi.com/trade-api/v2/markets (public, no auth needed for read). Paper orders complete without keys (v1 paper-only design — no KEY_MISSING error). Live-tested returning real markets."
+      "notes": "Endpoint in src/gateway/index.ts; runs-log.ts is the ring buffer. Smoke test passes 3 invocation-related tests (safe invoke, destructive block, destructive confirm). All handle the destructive double-call gate."
     },
     {
       "id": "US-006",
-      "title": "Polymarket adapter",
-      "description": "As a user, I want scan + paper-order on Polymarket.",
+      "title": "Floating Agent Console",
+      "description": "As a user, I want a persistent console showing the agent's current recommendation, recent runs, and a one-click apply button.",
       "acceptanceCriteria": [
-        "rails/polymarket.js exports scan(limit) and order({symbol, side, qty})",
-        "scan pulls top-volume markets from Polymarket CLOB",
-        "order in paper mode writes to ledger at midpoint price",
-        "Missing key: scan empty, order throws KEY_MISSING",
-        "Tests pass",
-        "Typecheck passes"
+        "Collapsed: 48px circular button bottom-right with status dot",
+        "Expanded: 360px panel with current status, latest suggestion, 3 recent runs, Apply button",
+        "Apply routes through the skill invocation endpoint",
+        "New file: packages/dashboard/src/components/AgentConsole.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Uses gamma-api.polymarket.com/markets (public). Live-tested: returned 'Russia-Ukraine Ceasefire before GTA VI?' at 52-54c with $1.5M volume."
+      "notes": "AgentConsole shipped. Bundle testid 'agent-console-pill' confirmed."
     },
     {
       "id": "US-007",
-      "title": "Alpaca adapter",
-      "description": "As a user, I want scan + paper-order on Alpaca stocks.",
+      "title": "Agent flow visualizer (DAG)",
+      "description": "As a user, I want a live graph showing how data moves through the harness — scrapers → strategies → risk → execution.",
       "acceptanceCriteria": [
-        "rails/alpaca.js exports scan(limit) and order",
-        "scan uses paper-api.alpaca.markets when key is a paper key",
-        "order in paper mode writes to our ledger, not Alpaca's paper ledger",
-        "Missing key: scan empty, order throws KEY_MISSING",
-        "Tests pass",
-        "Typecheck passes"
+        "Renders nodes grouped by category (setup, inspect, trade, safety)",
+        "SVG bezier edges; pulse animation on recent runs",
+        "Click node to see tooltip with skill details",
+        "New file: packages/dashboard/src/components/FlowVisualizer.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Uses data.alpaca.markets/v2/stocks/snapshots with optional auth. Graceful degrade: returns rows with note:'scan failed' on 401 rather than erroring. Orders write to local ledger."
+      "notes": "FlowVisualizer.tsx shipped — category-column DAG with pulse animation on recent runs. Bundle testids 'flow-visualizer', 'flow-node-', 'flow-tooltip' confirmed."
     },
     {
       "id": "US-008",
-      "title": "Coinbase Advanced Trade adapter",
-      "description": "As a user, I want scan + paper-order on Coinbase crypto.",
+      "title": "Type-to-confirm gate for destructive skills",
+      "description": "As a user, I want a deliberate type-to-confirm step on panic, sell, close, and reduce so I never flatten my book by accident.",
       "acceptanceCriteria": [
-        "rails/coinbase.js exports scan(limit) and order",
-        "scan uses Coinbase public products endpoint for top-volume pairs",
-        "order in paper mode writes to ledger at last trade price",
-        "order without keys throws KEY_MISSING; scan works without keys",
-        "Tests pass",
-        "Typecheck passes"
+        "Modal dialog shown before destructive invocations",
+        "User must type literal confirm word (PANIC, CLOSE, REDUCE) — case-sensitive",
+        "Confirm button disabled until typed string matches",
+        "Escape or clicking outside cancels",
+        "Successful confirm attaches confirmed: true to POST",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Uses api.exchange.coinbase.com/products/<pair>/ticker (public). Live-tested: BTC-USD $77,406, ETH-USD $2429.30, SOL-USD $89.43."
+      "notes": "ConfirmDestructive modal shipped; bundle testid 'confirm-modal' present. Backend gate verified via smoke test: panic blocks without confirmed, executes with confirmed."
     },
     {
       "id": "US-009",
-      "title": "Unified scan command",
-      "description": "As a user, I want one command that aggregates scans across all enabled rails.",
+      "title": "Chained execution playbooks",
+      "description": "As a user, I want to queue a multi-step playbook and have the agent execute it one step at a time with previews.",
       "acceptanceCriteria": [
-        "node bin/tradex.js scan [rail] [limit] runs all enabled rail scans in parallel; single rail if specified",
-        "Returns JSON {candidates: [{exchange, symbol, price, thesis?}]} capped at limit (default 10)",
-        "Rail errors are logged to stderr and skipped; whole scan never fails because one rail is down",
-        "Tests pass",
-        "Typecheck passes"
+        "Chain button opens builder; add 2–6 skill invocations in order",
+        "Each step previews args with {previous.output} template tokens",
+        "Dry run shows what each step would invoke without executing",
+        "Run executes sequentially, aborting on first failure",
+        "Destructive steps require per-step confirmation",
+        "POST /api/agent/chains/run returns chainId; WS events chain:start, chain:step:start, chain:step, chain:complete",
+        "New file: packages/dashboard/src/components/ChainBuilder.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Returns {ok, markets:[{rail, symbol, title, bid, ask, volume,...}]} (slightly different schema than spec but richer). Per-rail errors surface in the row's `error` field, whole scan never throws."
+      "notes": "ChainBuilder.tsx + POST /api/agent/chains/run shipped. Smoke test covers 4 chain scenarios: dry-run returns dry-run per step, safe chain runs sequentially, destructive step blocks mid-chain, runs tagged with chainId in audit log."
     },
     {
       "id": "US-010",
-      "title": "Unified order routing (buy/sell)",
-      "description": "As a user, I want buy/sell commands that route to the correct rail by prefix.",
+      "title": "Audit log panel",
+      "description": "As a user, I want an always-visible audit trail of every skill invocation.",
       "acceptanceCriteria": [
-        "node bin/tradex.js buy <rail>:<symbol> <qty> dispatches to the right rail adapter",
-        "node bin/tradex.js sell <rail>:<symbol> <qty> closes or shorts symmetrically",
-        "Invalid rail exits non-zero with {error, code: 'BAD_RAIL'} on stdout",
-        "All orders default to paper mode in v1",
-        "Tests pass",
-        "Typecheck passes"
+        "Audit log in RightSidebar (or its own section) showing last N runs",
+        "Each row: timestamp, skill id, args summary, status badge, duration",
+        "Click to expand full args + output",
+        "Data source: /api/agent/runs + WS run events",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 10,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. API shape: `buy <rail> <symbol> <qty> [price]` and `sell <position-id> [price]` — space-separated rather than `rail:symbol`. Sell by position-id is more explicit than by symbol (handles multiple positions on same symbol). Invalid rail exits non-zero with ok:false + rails array."
+      "notes": "RunsAuditPanel rendered in RightSidebar. Bundle testid 'audit-panel' confirmed. Chain runs tagged with chainId."
     },
     {
       "id": "US-011",
-      "title": "Positions and risk aggregation",
-      "description": "As a user, I want positions and risk commands that span all rails.",
+      "title": "Agent-initiated skill suggestions",
+      "description": "As a user, I want the agent to proactively surface skill suggestions based on state.",
       "acceptanceCriteria": [
-        "node bin/tradex.js positions prints JSON array of open ledger positions marked to latest prices",
-        "node bin/tradex.js risk prints {dailyPnl, openPositions, maxOpenPositions, atCap}",
-        "Mark-to-market uses rail scan with 30s cache to avoid rate limits",
-        "Tests pass",
+        "GET /api/agent/suggest returns ranked suggestions with priority high/normal/low",
+        "Each suggestion exposes skillId + prefilled args and a reason",
+        "Suggestions never fire during panic cooldown or for blocked skills",
+        "Rule-based engine lives in src/agent/suggestions.ts",
         "Typecheck passes"
       ],
       "priority": 11,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. risk returns {openPositions, exposure, dailyRealized, dailyUnrealized, dailyTotal, panicCooldown}. MtM cache deferred (v1 uses last-written mark; users can re-scan to refresh)."
+      "notes": "Endpoint live. Verified live: returns 3 ranked suggestions including high-priority 'onboard' when AI not configured. Smoke test covers '/api/agent/suggest returns prioritized suggestions'."
     },
     {
       "id": "US-012",
-      "title": "Panic flatten command",
-      "description": "As a user, I want one command that closes every open position.",
+      "title": "Dashboard context → agent system prompt",
+      "description": "As the agent reasoning over commands, I need dashboard state injected into my system prompt so answers reference what the user sees.",
       "acceptanceCriteria": [
-        "node bin/tradex.js panic closes all open ledger positions at latest mark",
-        "10-second in-memory cooldown — repeat calls within 10s return {cooldown: true}",
-        "Prints {closed: N, realizedPnl: X}",
-        "Tests pass",
+        "buildContext() in src/ai/index.ts prepends [Current Dashboard Context] block",
+        "Block includes mode, halt state, equity, daily P&L, open positions, rails, last 5 skill runs",
+        "Context kept under 600 tokens",
+        "OPENTRADEX_DISABLE_CONTEXT_INJECT=1 disables it",
         "Typecheck passes"
       ],
       "priority": 12,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Cooldown is 30 minutes (not 10s) and persisted to ledger.json so restarts respect it. Live-tested: flattened 2 positions, cooldownUntil timestamp set. Risk officer agent checks cooldown before approving buys."
+      "notes": "buildContext() enhanced to include isTradingHalted, getEquity, getRuns(5), and enabled rails. Env-var kill switch respected. Backend typecheck clean."
     },
     {
       "id": "US-013",
-      "title": "/opentradex-trade:scan skill",
-      "description": "As a user, I want a slash command that scans and formats the result.",
+      "title": "Keyboard shortcuts for top skills",
+      "description": "As a power user, I want one-keystroke shortcuts to trigger common skills.",
       "acceptanceCriteria": [
-        "skills/scan/SKILL.md has name: scan, auto-invoke description",
-        "Skill body calls node bin/tradex.js scan $1 $2 and renders <=5 candidates with one-line thesis",
-        "allowed-tools: Bash(node *)",
-        "Typecheck passes"
+        "g then s → Skills page; g then m → Markets; g then t → Trades",
+        "g then r → risk snapshot; g then p → positions check",
+        "c → open Chain Builder",
+        "! → opens panic confirmation",
+        "/ → focuses chat input",
+        "? → opens shortcut help overlay",
+        "Shortcuts disabled when focus is inside input/textarea",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 13,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. name: opentradex-scan. allowed-tools scoped to `Bash(node bin/tradex.js scan:*), Bash(node bin/tradex.js status:*)` for tighter safety than Bash(node *)."
+      "notes": "Bigram detection with 1s timeout; input/textarea guard in App.tsx. ShortcutsHelp.tsx modal lists all bindings. Bundle testids 'shortcuts-help', 'shortcuts-close', 'help-trigger' confirmed."
     },
     {
       "id": "US-014",
-      "title": "/opentradex-trade:positions skill",
-      "description": "As a user, I want a blotter slash command.",
+      "title": "Skills live status badges in TopBar",
+      "description": "As a user, I want small status badges showing at-a-glance harness state.",
       "acceptanceCriteria": [
-        "skills/positions/SKILL.md calls node bin/tradex.js positions",
-        "Renders a markdown table with Exchange | Symbol | Side | Qty | Entry | Mark | P&L",
-        "Empty state prints: No open positions",
-        "Typecheck passes"
+        "Scraper rollup badge (red/yellow/green/grey)",
+        "Halt badge appears when trading is halted",
+        "Active runs badge shows count during recent activity",
+        "AI-ready warning badge if no provider configured",
+        "Click opens detail panel",
+        "New file: packages/dashboard/src/components/HarnessStatusBadges.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 14,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Skill instructs one-line-per-position rendering; Claude picks table vs list depending on terminal width."
+      "notes": "HarnessStatusBadges.tsx shipped and wired to TopBar. Bundle testids 'harness-status', 'scraper-badge', 'active-runs-badge' confirmed."
     },
     {
       "id": "US-015",
-      "title": "/opentradex-trade:risk skill",
-      "description": "As a user, I want a quick risk read as a slash command.",
+      "title": "E2E smoke test — complete command-center flow",
+      "description": "As a developer, I need an E2E test that exercises the full Command Center flow so regressions are caught.",
       "acceptanceCriteria": [
-        "skills/risk/SKILL.md calls node bin/tradex.js risk",
-        "Renders 3-4 short lines in Risk Officer voice including halted flag and cap utilization",
-        "Typecheck passes"
+        "Test file: packages/dashboard/smoke-test.mjs",
+        "Covers: health, context, suggest, skills list, safe invoke, destructive block, destructive confirm, runs log, HTML served, bundle testid coverage",
+        "Covers chains: dry-run, sequential execution, destructive abort, audit log tagging",
+        "All tests pass against live gateway"
       ],
       "priority": 15,
       "passes": true,
-      "notes": "Shipped in 61d2cc2."
+      "notes": "14/14 smoke tests passing against live gateway on :3210. Runs via `node packages/dashboard/smoke-test.mjs`."
     },
     {
       "id": "US-016",
-      "title": "/opentradex-trade:buy and /opentradex-trade:sell skills",
-      "description": "As a user, I want slash commands for orders.",
+      "title": "Documentation for skill authors",
+      "description": "As a developer adding a new skill, I need a short guide so I know how the skill surfaces in the Command Center.",
       "acceptanceCriteria": [
-        "skills/buy/SKILL.md and skills/sell/SKILL.md exist",
-        "Both accept <rail>:<symbol> <qty> arguments",
-        "Both pre-flight-check risk caps and refuse with 'VETO' when over cap",
-        "Both default to paper in v1",
-        "Typecheck passes"
+        "New file: docs/adding-a-skill.md",
+        "Covers registry shape, destructive vs non-destructive flags, args schema, command template contract",
+        "Includes worked example and verification steps",
+        "Lists every surface a skill automatically appears on"
       ],
       "priority": 16,
       "passes": true,
-      "notes": "Shipped in 61d2cc2. Buy skill calls `risk` pre-flight and warns at openPositions>=5 or dailyTotal<=-50. Hard VETO is delegated to the risk-officer agent (/agents/risk-officer.md) which returns APPROVE/BLOCK verdicts."
-    },
-    {
-      "id": "US-017",
-      "title": "/opentradex-trade:panic skill (manual-only)",
-      "description": "As a user, I want the kill switch as a confirmation-gated slash command.",
-      "acceptanceCriteria": [
-        "skills/panic/SKILL.md has disable-model-invocation: true",
-        "Skill asks for literal 'yes flatten' confirmation before running",
-        "Only invokes node bin/tradex.js panic on matching confirmation",
-        "Prints the flatten result",
-        "Typecheck passes"
-      ],
-      "priority": 17,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2. Confirmation word: `yes` (simpler than 'yes flatten'); full-sentence prompt explains consequences. disable-model-invocation: true verified in frontmatter."
-    },
-    {
-      "id": "US-018",
-      "title": "/opentradex-trade:trade mega-skill dispatcher",
-      "description": "As a user, I want one skill that handles the entire flow from a single slash command.",
-      "acceptanceCriteria": [
-        "skills/trade/SKILL.md accepts <subcommand> [args...] (scan, buy, sell, positions, risk, panic, status)",
-        "Skill body routes to the same bin/tradex.js helper subcommand",
-        "Unknown subcommand prints a short usage list",
-        "Typecheck passes"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2. The trade skill is the conversational copilot entry — orchestrates scan+risk+suggestion and routes order confirmations to the dedicated buy/sell skills rather than proxying subcommands directly."
-    },
-    {
-      "id": "US-019",
-      "title": "Scout subagent",
-      "description": "As a user, I want a specialized market reconnaissance agent.",
-      "acceptanceCriteria": [
-        "agents/scout.md has name: scout, model: sonnet, tools limited to Bash + Read",
-        "Persona: scan 4 rails in parallel, return 3-5 candidates max, no fabrication",
-        "Typecheck passes"
-      ],
-      "priority": 19,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2. name: opentradex-scout, model: sonnet, tools: Bash, Read. Persona enforces read-only + no-fabrication rules."
-    },
-    {
-      "id": "US-020",
-      "title": "Risk Officer subagent",
-      "description": "As a user, I want a gatekeeper agent that refuses over-cap trades.",
-      "acceptanceCriteria": [
-        "agents/risk-officer.md exists with veto voice from soul/agents persona",
-        "Pulls bin/tradex.js risk state before any ruling",
-        "Typecheck passes"
-      ],
-      "priority": 20,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2. Emits structured APPROVE/BLOCK JSON with reason + maxSize."
-    },
-    {
-      "id": "US-021",
-      "title": "Coach subagent",
-      "description": "As a user, I want post-trade pattern review.",
-      "acceptanceCriteria": [
-        "agents/coach.md exists with coach voice",
-        "Reads ledger trades array for realized history",
-        "Typecheck passes"
-      ],
-      "priority": 21,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2. Surfaces one pattern per session (oversizing/revenge/cutting-winners/holding-losers/concentration) with evidence."
-    },
-    {
-      "id": "US-022",
-      "title": "Plugin README",
-      "description": "As a potential user, I want a README explaining install, usage, and safety.",
-      "acceptanceCriteria": [
-        "opentradex-trade/README.md covers install, onboard, 4 supported rails, slash command list, paper-only disclaimer, troubleshooting",
-        "Explicit 'v1 is paper-only; live trading is a non-goal for this version' notice",
-        "One-glance command cheatsheet included"
-      ],
-      "priority": 22,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2. Paper-only disclaimer in intro + 'What this plugin does not do' section. Command cheatsheet in CLI section."
-    },
-    {
-      "id": "US-023",
-      "title": "LICENSE and marketplace metadata",
-      "description": "As a maintainer, I want the plugin ready for marketplace publication.",
-      "acceptanceCriteria": [
-        "opentradex-trade/LICENSE exists (MIT)",
-        "plugin.json keywords include trading, kalshi, polymarket, alpaca, crypto, paper-trading, claude-code-plugin",
-        "plugin.json has homepage and repository fields"
-      ],
-      "priority": 23,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2. MIT LICENSE + 9 keywords matching spec + homepage and repository point at deonmenezes/opentradex."
-    },
-    {
-      "id": "US-024",
-      "title": "End-to-end smoke test",
-      "description": "As a maintainer, I want an automated test that wires the whole flow together.",
-      "acceptanceCriteria": [
-        "One test spec boots the helper, stubs each rail's network, runs onboard -> scan -> buy -> positions -> risk -> panic, asserts final state",
-        "Runs in under 5 seconds",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 24,
-      "passes": true,
-      "notes": "Shipped in 61d2cc2 as live manual smoke — scan (Kalshi/Polymarket/Coinbase real data, Alpaca 401 graceful), buy BTC @ 65000, sell @ 77406 ($124.06 P&L), buy Polymarket @ 0.59 exit 0.60 ($0.10), panic flattened 2 positions + set 30m cooldown. Automated spec deferred to v1.1."
+      "notes": "docs/adding-a-skill.md shipped with 3-step walkthrough, category semantics table, design rules, and surface matrix."
     }
   ]
 }
