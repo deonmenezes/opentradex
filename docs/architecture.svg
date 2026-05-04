@@ -1,0 +1,260 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 860" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="host" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="orch" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+    <linearGradient id="fsm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#d946ef"/>
+    </linearGradient>
+    <linearGradient id="recon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#0891b2"/>
+    </linearGradient>
+    <linearGradient id="hunter" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="chain" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#ea580c"/>
+    </linearGradient>
+    <linearGradient id="verify" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ec4899"/>
+      <stop offset="100%" stop-color="#db2777"/>
+    </linearGradient>
+    <linearGradient id="grade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#eab308"/>
+      <stop offset="100%" stop-color="#ca8a04"/>
+    </linearGradient>
+    <linearGradient id="report" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#7e22ce"/>
+    </linearGradient>
+    <linearGradient id="mcp" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#0ea5e9"/>
+    </linearGradient>
+    <linearGradient id="disk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="guard" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dc2626"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrW" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#e2e8f0"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="860" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="600" y="42" text-anchor="middle" font-size="26" font-weight="700" fill="#f1f5f9">bug-bounty · system architecture</text>
+  <text x="600" y="66" text-anchor="middle" font-size="13" fill="#94a3b8">7-phase FSM · parallel agents · MCP control plane · disk-persisted state</text>
+
+  <!-- Claude Code host outer container -->
+  <rect x="40" y="90" width="1120" height="620" rx="18" fill="url(#host)" stroke="#6366f1" stroke-width="1.5" opacity="0.95"/>
+  <text x="70" y="120" font-size="14" font-weight="600" fill="#c7d2fe">Claude Code · host runtime</text>
+
+  <!-- Orchestrator -->
+  <rect x="70" y="140" width="240" height="70" rx="12" fill="url(#orch)" filter="url(#glow)"/>
+  <text x="190" y="170" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">Orchestrator</text>
+  <text x="190" y="190" text-anchor="middle" font-size="11" fill="#fff" opacity="0.9">/bountyagent target.com</text>
+
+  <!-- FSM -->
+  <rect x="340" y="140" width="240" height="70" rx="12" fill="url(#fsm)" filter="url(#glow)"/>
+  <text x="460" y="170" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">FSM · state.json</text>
+  <text x="460" y="190" text-anchor="middle" font-size="11" fill="#fff" opacity="0.9">phase · wave · findings</text>
+
+  <line x1="310" y1="175" x2="340" y2="175" stroke="#e2e8f0" stroke-width="2" marker-end="url(#arrW)"/>
+  <line x1="340" y1="180" x2="310" y2="180" stroke="#e2e8f0" stroke-width="2" marker-end="url(#arrW)"/>
+
+  <!-- Phase chain -->
+  <text x="620" y="175" font-size="13" font-weight="600" fill="#fbbf24">spawns ▶</text>
+
+  <!-- Agent row -->
+  <g>
+    <!-- RECON -->
+    <rect x="70" y="240" width="150" height="92" rx="10" fill="url(#recon)" filter="url(#glow)"/>
+    <text x="145" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">RECON</text>
+    <text x="145" y="283" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">recon-agent</text>
+    <text x="145" y="302" text-anchor="middle" font-size="10" fill="#ecfeff">subfinder · httpx</text>
+    <text x="145" y="316" text-anchor="middle" font-size="10" fill="#ecfeff">nuclei · JS extract</text>
+
+    <!-- HUNT (parallel) -->
+    <rect x="238" y="240" width="220" height="92" rx="10" fill="url(#hunter)" filter="url(#glow)"/>
+    <text x="348" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">HUNT · parallel waves</text>
+    <text x="348" y="283" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">hunter × N</text>
+    <text x="348" y="302" text-anchor="middle" font-size="10" fill="#d1fae5">2–6 waves · per-surface</text>
+    <text x="348" y="316" text-anchor="middle" font-size="10" fill="#d1fae5">wave-N-assignments.json</text>
+    <circle cx="260" cy="260" r="6" fill="#fff" opacity="0.35"/>
+    <circle cx="275" cy="260" r="6" fill="#fff" opacity="0.55"/>
+    <circle cx="290" cy="260" r="6" fill="#fff" opacity="0.8"/>
+
+    <!-- CHAIN -->
+    <rect x="476" y="240" width="150" height="92" rx="10" fill="url(#chain)" filter="url(#glow)"/>
+    <text x="551" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">CHAIN</text>
+    <text x="551" y="283" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">chain-builder</text>
+    <text x="551" y="302" text-anchor="middle" font-size="10" fill="#ffedd5">A → B exploit</text>
+    <text x="551" y="316" text-anchor="middle" font-size="10" fill="#ffedd5">chains.md</text>
+
+    <!-- VERIFY stack -->
+    <rect x="644" y="240" width="210" height="92" rx="10" fill="url(#verify)" filter="url(#glow)"/>
+    <text x="749" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">VERIFY · 3 rounds</text>
+    <text x="749" y="282" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">brutalist → balanced → final</text>
+    <text x="749" y="301" text-anchor="middle" font-size="10" fill="#fce7f3">skeptical · false-neg catch</text>
+    <text x="749" y="316" text-anchor="middle" font-size="10" fill="#fce7f3">fresh-PoC confirm</text>
+
+    <!-- GRADE -->
+    <rect x="872" y="240" width="130" height="92" rx="10" fill="url(#grade)" filter="url(#glow)"/>
+    <text x="937" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="#1f2937">GRADE</text>
+    <text x="937" y="283" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2937">grader</text>
+    <text x="937" y="302" text-anchor="middle" font-size="10" fill="#422006">5-axis score</text>
+    <text x="937" y="316" text-anchor="middle" font-size="10" fill="#422006">SUBMIT / HOLD / SKIP</text>
+
+    <!-- REPORT -->
+    <rect x="1020" y="240" width="110" height="92" rx="10" fill="url(#report)" filter="url(#glow)"/>
+    <text x="1075" y="263" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">REPORT</text>
+    <text x="1075" y="283" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">report-writer</text>
+    <text x="1075" y="302" text-anchor="middle" font-size="10" fill="#f3e8ff">&lt;600 words</text>
+    <text x="1075" y="316" text-anchor="middle" font-size="10" fill="#f3e8ff">PoC + CVSS</text>
+  </g>
+
+  <!-- Phase flow arrows (between boxes) -->
+  <g stroke="#fbbf24" stroke-width="2.5" fill="none" marker-end="url(#arr)">
+    <line x1="220" y1="286" x2="238" y2="286" stroke="#fbbf24"/>
+    <line x1="458" y1="286" x2="476" y2="286" stroke="#fbbf24"/>
+    <line x1="626" y1="286" x2="644" y2="286" stroke="#fbbf24"/>
+    <line x1="854" y1="286" x2="872" y2="286" stroke="#fbbf24"/>
+    <line x1="1002" y1="286" x2="1020" y2="286" stroke="#fbbf24"/>
+  </g>
+
+  <!-- Arrow from orchestrator down to agent row -->
+  <path d="M 190 210 L 190 230 L 145 230 L 145 240" stroke="#fbbf24" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- MCP bus -->
+  <rect x="70" y="370" width="1060" height="110" rx="14" fill="url(#mcp)" filter="url(#glow)"/>
+  <text x="600" y="400" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">MCP control plane · stdio · Node.js · zero dependencies</text>
+  <text x="600" y="422" text-anchor="middle" font-size="11" fill="#e0f2fe">schema-validated tool I/O · every artifact has canonical provenance</text>
+
+  <g font-size="10.5" font-family="'SF Mono', 'Consolas', monospace" fill="#ecfeff">
+    <text x="100" y="452">bounty_http_scan</text>
+    <text x="235" y="452">bounty_record_finding</text>
+    <text x="385" y="452">bounty_write_verification_round</text>
+    <text x="600" y="452">bounty_write_grade_verdict</text>
+    <text x="790" y="452">bounty_merge_wave_handoffs</text>
+    <text x="965" y="452">bounty_transition_phase</text>
+    <text x="100" y="470">bounty_init_session</text>
+    <text x="235" y="470">bounty_list_findings</text>
+    <text x="385" y="470">bounty_read_verification_round</text>
+    <text x="600" y="470">bounty_read_grade_verdict</text>
+    <text x="790" y="470">bounty_wave_handoff_status</text>
+    <text x="965" y="470">bounty_auth_manual</text>
+  </g>
+
+  <!-- Agent → MCP arrows -->
+  <g stroke="#e2e8f0" stroke-width="1.5" fill="none" opacity="0.5" stroke-dasharray="4,3" marker-end="url(#arrW)">
+    <line x1="145" y1="332" x2="145" y2="368"/>
+    <line x1="348" y1="332" x2="348" y2="368"/>
+    <line x1="551" y1="332" x2="551" y2="368"/>
+    <line x1="749" y1="332" x2="749" y2="368"/>
+    <line x1="937" y1="332" x2="937" y2="368"/>
+    <line x1="1075" y1="332" x2="1075" y2="368"/>
+  </g>
+
+  <!-- Disk state -->
+  <rect x="70" y="510" width="1060" height="180" rx="14" fill="url(#disk)" stroke="#475569" stroke-width="1.5"/>
+  <text x="600" y="538" text-anchor="middle" font-size="16" font-weight="700" fill="#e2e8f0">Session state · ~/bounty-agent-sessions/&lt;target&gt;/</text>
+  <text x="600" y="558" text-anchor="middle" font-size="11" fill="#94a3b8">JSON = authoritative control plane   ·   Markdown = human / debug mirror</text>
+
+  <g font-size="11" font-family="'SF Mono', 'Consolas', monospace">
+    <!-- col 1 -->
+    <rect x="90" y="575" width="230" height="100" rx="8" fill="#1e293b" stroke="#334155"/>
+    <text x="100" y="593" fill="#7dd3fc" font-weight="700">FSM</text>
+    <text x="100" y="611" fill="#e2e8f0">state.json</text>
+    <text x="100" y="627" fill="#e2e8f0">attack_surface.json</text>
+    <text x="100" y="643" fill="#e2e8f0">wave-N-assignments.json</text>
+    <text x="100" y="659" fill="#94a3b8">SESSION_HANDOFF.md</text>
+
+    <!-- col 2 -->
+    <rect x="336" y="575" width="230" height="100" rx="8" fill="#1e293b" stroke="#334155"/>
+    <text x="346" y="593" fill="#34d399" font-weight="700">Findings (append-only)</text>
+    <text x="346" y="611" fill="#e2e8f0">findings.jsonl</text>
+    <text x="346" y="627" fill="#94a3b8">findings.md</text>
+    <text x="346" y="643" fill="#e2e8f0">handoff-wN-aN.json</text>
+    <text x="346" y="659" fill="#94a3b8">handoff-wN-aN.md</text>
+
+    <!-- col 3 -->
+    <rect x="582" y="575" width="230" height="100" rx="8" fill="#1e293b" stroke="#334155"/>
+    <text x="592" y="593" fill="#f472b6" font-weight="700">Verification</text>
+    <text x="592" y="611" fill="#e2e8f0">brutalist.json</text>
+    <text x="592" y="627" fill="#e2e8f0">balanced.json</text>
+    <text x="592" y="643" fill="#e2e8f0">verified-final.json</text>
+    <text x="592" y="659" fill="#94a3b8">chains.md</text>
+
+    <!-- col 4 -->
+    <rect x="828" y="575" width="282" height="100" rx="8" fill="#1e293b" stroke="#334155"/>
+    <text x="838" y="593" fill="#fbbf24" font-weight="700">Grade + submission</text>
+    <text x="838" y="611" fill="#e2e8f0">grade.json</text>
+    <text x="838" y="627" fill="#94a3b8">grade.md</text>
+    <text x="838" y="643" fill="#e2e8f0">report.md</text>
+    <text x="838" y="659" fill="#94a3b8">(submission-ready)</text>
+  </g>
+
+  <!-- MCP → Disk arrows -->
+  <g stroke="#e2e8f0" stroke-width="1.5" opacity="0.4" stroke-dasharray="4,3" marker-end="url(#arrW)">
+    <line x1="200" y1="480" x2="200" y2="570"/>
+    <line x1="450" y1="480" x2="450" y2="570"/>
+    <line x1="700" y1="480" x2="700" y2="570"/>
+    <line x1="950" y1="480" x2="950" y2="570"/>
+  </g>
+
+  <!-- Safety rails -->
+  <rect x="70" y="720" width="1060" height="110" rx="14" fill="url(#guard)" filter="url(#glow)" opacity="0.95"/>
+  <text x="600" y="747" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">Safety rails · PreToolUse hooks · always-on rules</text>
+
+  <g font-size="11.5">
+    <rect x="90" y="760" width="240" height="58" rx="8" fill="#7f1d1d" stroke="#fecaca" stroke-width="0.5"/>
+    <text x="210" y="779" text-anchor="middle" font-weight="700" fill="#fff">scope-guard.sh</text>
+    <text x="210" y="795" text-anchor="middle" fill="#fecaca">blocks out-of-scope Bash</text>
+    <text x="210" y="810" text-anchor="middle" fill="#fecaca">deny-list.txt hard block</text>
+
+    <rect x="346" y="760" width="240" height="58" rx="8" fill="#7f1d1d" stroke="#fecaca" stroke-width="0.5"/>
+    <text x="466" y="779" text-anchor="middle" font-weight="700" fill="#fff">session-write-guard.sh</text>
+    <text x="466" y="795" text-anchor="middle" fill="#fecaca">prevents direct state clobber</text>
+    <text x="466" y="810" text-anchor="middle" fill="#fecaca">forces MCP for writes</text>
+
+    <rect x="602" y="760" width="240" height="58" rx="8" fill="#7f1d1d" stroke="#fecaca" stroke-width="0.5"/>
+    <text x="722" y="779" text-anchor="middle" font-weight="700" fill="#fff">hunting.md · reporting.md</text>
+    <text x="722" y="795" text-anchor="middle" fill="#fecaca">20 hunt rules · 12 report rules</text>
+    <text x="722" y="810" text-anchor="middle" fill="#fecaca">injected into every agent</text>
+
+    <rect x="858" y="760" width="240" height="58" rx="8" fill="#7f1d1d" stroke="#fecaca" stroke-width="0.5"/>
+    <text x="978" y="779" text-anchor="middle" font-weight="700" fill="#fff">bounty-statusline.js</text>
+    <text x="978" y="795" text-anchor="middle" fill="#fecaca">phase · wave · finding count</text>
+    <text x="978" y="810" text-anchor="middle" fill="#fecaca">context usage · live footer</text>
+  </g>
+
+  <!-- Legend -->
+  <g font-size="10" fill="#94a3b8">
+    <text x="70" y="852">◆ solid arrow = phase transition     ◇ dashed arrow = MCP tool call     ▲ all writes schema-validated</text>
+  </g>
+</svg>

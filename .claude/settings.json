@@ -1,0 +1,98 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__bountyagent__bounty_http_scan",
+      "mcp__bountyagent__bounty_record_finding",
+      "mcp__bountyagent__bounty_read_findings",
+      "mcp__bountyagent__bounty_list_findings",
+      "mcp__bountyagent__bounty_write_verification_round",
+      "mcp__bountyagent__bounty_read_verification_round",
+      "mcp__bountyagent__bounty_write_grade_verdict",
+      "mcp__bountyagent__bounty_read_grade_verdict",
+      "mcp__bountyagent__bounty_init_session",
+      "mcp__bountyagent__bounty_read_session_state",
+      "mcp__bountyagent__bounty_transition_phase",
+      "mcp__bountyagent__bounty_start_wave",
+      "mcp__bountyagent__bounty_apply_wave_merge",
+      "mcp__bountyagent__bounty_write_handoff",
+      "mcp__bountyagent__bounty_write_wave_handoff",
+      "mcp__bountyagent__bounty_wave_handoff_status",
+      "mcp__bountyagent__bounty_merge_wave_handoffs",
+      "mcp__bountyagent__bounty_read_handoff",
+      "mcp__bountyagent__bounty_auth_manual",
+      "mcp__bountyagent__bounty_log_dead_ends",
+      "mcp__bountyagent__bounty_wave_status",
+      "mcp__bountyagent__bounty_temp_email",
+      "mcp__bountyagent__bounty_signup_detect",
+      "mcp__bountyagent__bounty_auth_store",
+      "mcp__bountyagent__bounty_read_hunter_brief",
+      "Bash(mkdir *)",
+      "Bash(test *)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(sort *)",
+      "Bash(wc *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(jq *)",
+      "Bash(printf *)",
+      "Bash(echo *)",
+      "Read",
+      "Glob",
+      "Grep"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/scope-guard.sh\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-write-guard.sh\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-write-guard.sh\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__bountyagent__bounty_http_scan",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/scope-guard-mcp.sh\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__bountyagent__bounty_signup_detect",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/scope-guard-mcp.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/bounty-statusline.js\""
+  }
+}

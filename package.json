@@ -1,90 +1,13 @@
 {
-  "name": "opentradex",
+  "name": "bountyagent",
   "version": "1.0.0",
-  "description": "Lightweight AI trading harness for prediction markets, stocks, and crypto. Paper-first, easily switchable to live. Includes desktop app and web dashboard.",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "bin": {
-    "opentradex": "dist/bin/cli.js"
-  },
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./gateway": {
-      "import": "./dist/gateway/index.js",
-      "types": "./dist/gateway/index.d.ts"
-    },
-    "./config": {
-      "import": "./dist/config.js",
-      "types": "./dist/config.d.ts"
-    },
-    "./risk": {
-      "import": "./dist/risk.js",
-      "types": "./dist/risk.d.ts"
-    }
-  },
+  "private": true,
+  "description": "Autonomous bug bounty hunting framework for Claude Code",
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.js",
-    "build:all": "npm run build && npm run build:dashboard",
-    "build:dashboard": "cd packages/dashboard && npm install && npm run build",
-    "build:desktop": "cd packages/desktop && npm install && npm run build",
-    "build:desktop:win": "cd packages/desktop && npm run build:win",
-    "build:desktop:mac": "cd packages/desktop && npm run build:mac",
-    "dev": "tsc --watch",
-    "dev:dashboard": "cd packages/dashboard && npm run dev",
-    "start": "node dist/bin/cli.js",
-    "gateway": "node dist/bin/cli.js run",
-    "onboard": "node dist/bin/cli.js onboard",
-    "ui": "npm run build:all && node packages/dashboard/dist/server.js",
-    "desktop": "cd packages/desktop && npm run dev",
-    "test": "tsx --test src/gateway/gateway.test.ts src/gateway/gateway-auth.test.ts src/config.test.ts src/risk.test.ts src/onboard.test.ts src/pair-qr.test.ts src/agent/strategies/strategies.test.ts packages/desktop/src/secrets.test.ts",
-    "test:live": "tsx --test src/scraper/exchanges.live.test.ts",
-    "clean": "rm -rf dist packages/dashboard/dist packages/desktop/dist packages/desktop/release"
+    "test": "node --test test/mcp-server.test.js",
+    "install-browser": "npx patchright install chromium"
   },
-  "keywords": [
-    "trading",
-    "prediction-markets",
-    "kalshi",
-    "polymarket",
-    "alpaca",
-    "stocks",
-    "crypto",
-    "ai-harness",
-    "paper-trading",
-    "trading-bot",
-    "desktop-app",
-    "electron"
-  ],
-  "author": "deonmenezes",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/deonmenezes/opentradex.git"
-  },
-  "bugs": {
-    "url": "https://github.com/deonmenezes/opentradex/issues"
-  },
-  "homepage": "https://github.com/deonmenezes/opentradex#readme",
-  "workspaces": [
-    "packages/*"
-  ],
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.89.0",
-    "@types/qrcode": "^1.5.6",
-    "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
-    "viem": "^2.48.0",
-    "x402-fetch": "^1.2.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.4.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+  "optionalDependencies": {
+    "patchright": "^1.0.0"
   }
 }

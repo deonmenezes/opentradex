@@ -1,18 +1,15 @@
 node_modules/
-dist/
-*.log
+.next/
+data/
 .env
-.env.*
-.DS_Store
+.env.local
+.vercel
+
+# Local OMC state (per-dev workspace; don't commit)
 .omc/
 
-# Local Claude Code settings
+# Local Claude Code settings overrides
 .claude/settings.local.json
-.claude/scheduled_tasks.lock
 
-# Scratch scripts and screenshots
-tmp-*.ps1
-tmp-*.png
-
-# Electron-builder output
-packages/desktop/release/
+# Per-target hunt sessions (should live under ~/bounty-agent-sessions/ anyway)
+bounty-agent-sessions/
