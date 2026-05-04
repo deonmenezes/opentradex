@@ -1,0 +1,15 @@
+node_modules/
+.next/
+data/
+.env
+.env.local
+.vercel
+
+# Local OMC state (per-dev workspace; don't commit)
+.omc/
+
+# Local Claude Code settings overrides
+.claude/settings.local.json
+
+# Per-target hunt sessions (should live under ~/bounty-agent-sessions/ anyway)
+bounty-agent-sessions/

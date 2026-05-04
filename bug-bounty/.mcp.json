@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bountyagent": {
+      "command": "node",
+      "args": ["C:/Users/Deon/Downloads/bounty-agent-main/bounty-agent-main/mcp/server.js"]
+    },
+    "gmail-send": {
+      "command": "npx",
+      "args": ["@gongrzhe/server-gmail-autoauth-mcp"]
+    }
+  }
+}
