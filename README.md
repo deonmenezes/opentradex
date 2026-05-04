@@ -2,7 +2,6 @@
 
 Autonomous bug bounty hunting framework for Claude Code. A 7-phase finite state machine orchestrates specialized AI agents that do recon, hunt in parallel waves, verify findings across three skeptical rounds, grade them on a 5-axis rubric, and produce submission-ready reports — end to end from a single slash command.
 
-> Based on the original [`vmihalis/bounty-agent`](https://github.com/vmihalis/bounty-agent) framework. Republished here with architecture documentation and modifications.
 
 ![architecture](docs/architecture.svg)
 
