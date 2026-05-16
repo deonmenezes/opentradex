@@ -1,6 +1,6 @@
 /** Crypto market connector via CoinGecko + Kraken */
 
-import type { Market, MarketConnector, Quote, OrderBook } from '../types.js';
+import type { Market, MarketConnector, Quote, OrderBook, Order, TradeResult } from '../types.js';
 import { httpGet, retry } from './base.js';
 
 const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
@@ -149,6 +149,11 @@ export function createCryptoConnector(): MarketConnector {
         spread: bestAsk - bestBid,
         midPrice: (bestBid + bestAsk) / 2,
       };
+    },
+
+    async execute(order: Order): Promise<TradeResult> {
+      // TODO: Implement Kraken/Binance order execution
+      throw new Error('Live execution not implemented for Crypto');
     },
   };
 }

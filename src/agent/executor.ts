@@ -5,7 +5,7 @@
 import { EventEmitter } from 'events';
 import { ScanResult } from './scanner.js';
 import { recordPosition, closePosition as closeRiskPosition, getOpenPositions as getRiskPositions } from '../risk.js';
-import type { Exchange, Side } from '../types.js';
+import type { Exchange, Side, Order, TradeResult } from '../types.js';
 
 function mapExchange(raw: string): Exchange {
   const s = raw.toLowerCase();
@@ -17,32 +17,7 @@ function mapExchange(raw: string): Exchange {
   return 'tradingview';
 }
 
-export interface TradeResult {
-  success: boolean;
-  orderId?: string;
-  symbol: string;
-  exchange?: string;
-  side: 'buy' | 'sell';
-  quantity: number;
-  price: number;
-  pnl?: number;
-  error?: string;
-  timestamp: Date;
-  mode: string;
-}
 
-interface Order {
-  id: string;
-  symbol: string;
-  side: 'buy' | 'sell';
-  quantity: number;
-  type: 'market' | 'limit';
-  price?: number;
-  exchange?: string;
-  status: 'pending' | 'filled' | 'cancelled' | 'rejected';
-  filledPrice?: number;
-  filledAt?: Date;
-}
 
 interface Position {
   symbol: string;

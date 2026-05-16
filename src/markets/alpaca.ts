@@ -1,6 +1,6 @@
 /** Alpaca connector for stocks/ETFs with paper trading support */
 
-import type { Market, MarketConnector, Quote, OrderBook } from '../types.js';
+import type { Market, MarketConnector, Quote, OrderBook, Order, TradeResult } from '../types.js';
 import { httpGet, retry } from './base.js';
 
 const PAPER_BASE = 'https://paper-api.alpaca.markets';
@@ -240,6 +240,11 @@ export function createAlpacaConnector(config: AlpacaConfig = {}): MarketConnecto
         spread: q.ap - q.bp,
         midPrice: (q.ap + q.bp) / 2,
       };
+    },
+
+    async execute(order: Order): Promise<TradeResult> {
+      // TODO: Implement Alpaca V2 order placement
+      throw new Error('Live execution not implemented for Alpaca');
     },
   };
 }
