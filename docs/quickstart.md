@@ -10,6 +10,17 @@ Pick one — all three land at the same cockpit.
 
 ### CLI (fastest)
 
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/deonmenezes/opentradex.git
+cd opentradex
+npm install
+npm run build:all
+```
+
+Then initialize the configuration and start the gateway:
+
 ```bash
 npx opentradex onboard --paper-only && npx opentradex run
 ```
