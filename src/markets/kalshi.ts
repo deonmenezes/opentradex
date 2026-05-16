@@ -1,6 +1,6 @@
 /** Kalshi prediction market connector */
 
-import type { Market, MarketConnector, Quote, OrderBook } from '../types.js';
+import type { Market, MarketConnector, Quote, OrderBook, Order, TradeResult } from '../types.js';
 import { httpGet, retry } from './base.js';
 
 const PROD_BASE = 'https://api.elections.kalshi.com/trade-api/v2';
@@ -135,6 +135,11 @@ export function createKalshiConnector(config: KalshiConfig = {}): MarketConnecto
         spread: bestAsk - bestBid,
         midPrice: (bestBid + bestAsk) / 2,
       };
+    },
+
+    async execute(order: Order): Promise<TradeResult> {
+      // TODO: Implement Kalshi API order placement
+      throw new Error('Live execution not implemented for Kalshi');
     },
   };
 }

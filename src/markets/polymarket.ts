@@ -1,6 +1,6 @@
 /** Polymarket prediction market connector */
 
-import type { Market, MarketConnector, Quote, OrderBook } from '../types.js';
+import type { Market, MarketConnector, Quote, OrderBook, Order, TradeResult } from '../types.js';
 import { httpGet, retry } from './base.js';
 
 const GAMMA_BASE = 'https://gamma-api.polymarket.com';
@@ -144,6 +144,11 @@ export function createPolymarketConnector(config: PolyConfig = {}): MarketConnec
         spread: bestAsk - bestBid,
         midPrice: (bestBid + bestAsk) / 2,
       };
+    },
+
+    async execute(order: Order): Promise<TradeResult> {
+      // TODO: Implement Polymarket CLOB/Gamma order execution
+      throw new Error('Live execution not implemented for Polymarket');
     },
   };
 }
