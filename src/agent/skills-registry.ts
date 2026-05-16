@@ -84,9 +84,9 @@ export const SKILLS: Skill[] = [
   },
   {
     id: 'buy-alpaca',
-    name: 'Buy Alpaca (Stocks)',
+    name: 'Buy Alpaca',
     category: 'trade',
-    description: 'Open a position on a US equity via Alpaca (paper by default; live requires live-allowed mode and configured Alpaca API keys).',
+    description: 'Open a paper long position on a US equity or ETF via Alpaca at the live price.',
     args: [
       { name: 'symbol', type: 'string', required: true, description: 'US stock or ETF ticker (e.g. AAPL, SPY, NVDA)' },
       { name: 'qty', type: 'number', required: true, description: 'Share quantity', defaultValue: 1 },
