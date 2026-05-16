@@ -157,10 +157,28 @@ export class TradeExecutor extends EventEmitter {
   }
 
   private async executeLive(order: Order): Promise<TradeResult> {
-    // In production, this would connect to real broker APIs
-    // For now, fall back to paper trading
-    console.warn('Live trading not implemented, using paper mode');
-    return this.executePaper(order);
+    // Live broker integrations are not yet wired up for this exchange.
+    // We intentionally surface this as a visible failure rather than
+    // silently routing to paper — a user in live-allowed mode should
+    // know their order did NOT execute.
+    const msg =
+      `Live trading is not yet implemented for exchange "${order.exchange ?? 'unknown'}". ` +
+      'Your order was NOT filled. Please use paper mode or implement the broker adapter.';
+    console.error('[executor] ' + msg);
+    order.status = 'rejected';
+    this.emit('live-not-implemented', { order, message: msg });
+    return {
+      success: false,
+      orderId: order.id,
+      symbol: order.symbol,
+      exchange: order.exchange,
+      side: order.side,
+      quantity: order.quantity,
+      price: order.price ?? 0,
+      error: msg,
+      timestamp: new Date(),
+      mode: 'live-not-implemented',
+    };
   }
 
   private updatePosition(
