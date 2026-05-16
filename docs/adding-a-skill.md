@@ -171,3 +171,7 @@ Add a test case for your skill in `smoke-test.mjs` if it has meaningful behavior
 | WebSocket broadcasts      | `run:*`, `chain:*` events                |
 
 You get all of the above for free by adding a single entry to `SKILLS`.
+
+## Skills vs. Strategies
+
+Note that **Skills** are user-initiated discrete actions (like clicking a button or typing a command), while **Strategies** (in `src/agent/strategies/`) run continuously in the background on the data feed. If you are building an automated trading algorithm, you should create a Strategy, not a Skill. However, you can create a Skill to *toggle* your new Strategy on and off.
