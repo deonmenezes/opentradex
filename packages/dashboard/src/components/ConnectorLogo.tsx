@@ -35,6 +35,12 @@ const logos: Record<string, { bg: string; content: React.ReactNode }> = {
       </svg>
     ),
   },
+  crypto: {
+    bg: 'bg-[#181A20] ring-1 ring-[#FCD535]/30',
+    content: (
+      <div className="text-[10px] font-black tracking-tighter text-[#FCD535]">CRYPTO</div>
+    ),
+  },
   alpaca: {
     bg: 'bg-[#0F1A14] ring-1 ring-[#FFD400]/30',
     content: (
