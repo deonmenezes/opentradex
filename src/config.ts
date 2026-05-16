@@ -49,6 +49,8 @@ export interface OpenTradexConfig {
     polymarket: RailConfig;
     alpaca: RailConfig;
     oanda: RailConfig;
+    crypto: RailConfig;
+    tradingview: RailConfig;
   };
   feeds: {
     x?: { apiKey?: string; apiSecret?: string };
@@ -73,6 +75,8 @@ export function defaultConfig(): OpenTradexConfig {
       polymarket: { enabled: true, demo: true },
       alpaca: { enabled: false, demo: true },
       oanda: { enabled: false, demo: true },
+      crypto: { enabled: true, demo: true },
+      tradingview: { enabled: true, demo: true },
     },
     feeds: {
       rss: { feeds: [] },
