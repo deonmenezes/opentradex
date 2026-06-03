@@ -157,10 +157,9 @@ export class TradeExecutor extends EventEmitter {
   }
 
   private async executeLive(order: Order): Promise<TradeResult> {
-    // In production, this would connect to real broker APIs
-    // For now, fall back to paper trading
-    console.warn('Live trading not implemented, using paper mode');
-    return this.executePaper(order);
+    // Live trading requires explicit connector implementation
+    // Do not silently fall back to paper - this misleads users in live-allowed mode
+    throw new Error(`Live trading not implemented for ${order.exchange || 'default'}. Connect a live broker or switch to paper-default mode.`);
   }
 
   private updatePosition(
@@ -278,24 +277,15 @@ export class TradeExecutor extends EventEmitter {
     });
   }
 
-  getOpenPositionCount(): number {
-    return this.positions.size;
+  getPositions(): Map<string, Position> {
+    return new Map(this.positions);
   }
 
-  getPositions(): Position[] {
-    return Array.from(this.positions.values());
+  getOrders(): Map<string, Order> {
+    return new Map(this.orders);
   }
 
-  getOrders(): Order[] {
-    return Array.from(this.orders.values());
-  }
-
-  setMode(mode: 'paper-only' | 'paper-default' | 'live-allowed'): void {
-    this.mode = mode;
-    this.emit('mode-changed', mode);
-  }
-
-  getMode(): string {
-    return this.mode;
+  getOrder(orderId: string): Order | undefined {
+    return this.orders.get(orderId);
   }
 }
