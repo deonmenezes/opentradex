@@ -351,7 +351,7 @@ npx opentradex run
 
 ## License
 
-MIT. Trade responsibly. No warranty — this is paper-first for a reason.
+[MIT](LICENSE). Trade responsibly. No warranty — this is paper-first for a reason.
 
 <div align="center">
 
