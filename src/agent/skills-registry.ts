@@ -48,6 +48,24 @@ export const SKILLS: Skill[] = [
     commandTemplate: 'kalshi buy {side} {ticker} {qty}',
   },
   {
+    id: 'buy-polymarket',
+    name: 'Buy Polymarket',
+    category: 'trade',
+    description: 'Open a paper long position on a Polymarket prediction market at the live scraped price.',
+    args: [
+      { name: 'side', type: 'enum', required: true, description: 'YES or NO outcome', enumValues: ['yes', 'no'], defaultValue: 'yes' },
+      { name: 'marketId', type: 'string', required: true, description: 'Polymarket condition ID or slug (e.g. will-btc-hit-100k-in-2025)' },
+      { name: 'qty', type: 'number', required: true, description: 'USDC notional size', defaultValue: 10 },
+    ],
+    destructive: false,
+    requiresConfirmation: false,
+    exampleInvocations: [
+      'polymarket buy yes will-btc-hit-100k-in-2025 10',
+      'polymarket buy no will-fed-cut-in-september 25',
+    ],
+    commandTemplate: 'polymarket buy {side} {marketId} {qty}',
+  },
+  {
     id: 'buy-crypto',
     name: 'Buy Crypto',
     category: 'trade',
@@ -63,6 +81,24 @@ export const SKILLS: Skill[] = [
       'crypto buy ETH 0.05',
     ],
     commandTemplate: 'crypto buy {symbol} {qty}',
+  },
+  {
+    id: 'buy-alpaca',
+    name: 'Buy Alpaca',
+    category: 'trade',
+    description: 'Open a paper long position on a US equity or ETF via Alpaca at the live price.',
+    args: [
+      { name: 'symbol', type: 'string', required: true, description: 'US stock or ETF ticker (e.g. AAPL, SPY, NVDA)' },
+      { name: 'qty', type: 'number', required: true, description: 'Share quantity', defaultValue: 1 },
+    ],
+    destructive: false,
+    requiresConfirmation: false,
+    exampleInvocations: [
+      'alpaca buy AAPL 5',
+      'alpaca buy SPY 10',
+      'alpaca buy NVDA 1',
+    ],
+    commandTemplate: 'alpaca buy {symbol} {qty}',
   },
   {
     id: 'add-position',
