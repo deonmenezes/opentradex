@@ -1,6 +1,6 @@
 /** TradingView / Yahoo Finance connector for stocks */
 
-import type { Market, MarketConnector, Quote, OrderBook } from '../types.js';
+import type { Market, MarketConnector, Quote, OrderBook, Order, TradeResult } from '../types.js';
 import { httpGet, retry } from './base.js';
 
 // Using Yahoo Finance API (free, no auth required)
@@ -119,6 +119,11 @@ export function createTradingViewConnector(): MarketConnector {
         orderbook: ob,
         timestamp: Date.now(),
       };
+    },
+
+    async execute(order: Order): Promise<TradeResult> {
+      // TODO: Implement Oanda/InteractiveBrokers order fulfillment
+      throw new Error('Live execution not implemented for TradingView');
     },
   };
 }

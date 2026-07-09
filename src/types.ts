@@ -50,12 +50,42 @@ export interface Position {
   pnlPercent: number;
 }
 
+export type TradeSide = 'buy' | 'sell';
+
+export interface Order {
+  id: string;
+  symbol: string;
+  side: TradeSide;
+  quantity: number;
+  type: 'market' | 'limit';
+  price?: number;
+  exchange?: string;
+  status: 'pending' | 'filled' | 'cancelled' | 'rejected';
+  filledPrice?: number;
+  filledAt?: Date;
+}
+
+export interface TradeResult {
+  success: boolean;
+  orderId?: string;
+  symbol: string;
+  exchange?: string;
+  side: TradeSide;
+  quantity: number;
+  price: number;
+  pnl?: number;
+  error?: string;
+  timestamp: Date;
+  mode: string;
+}
+
 export interface MarketConnector {
   name: Exchange;
   scan(limit?: number): Promise<Market[]>;
   search(query: string): Promise<Market[]>;
   quote(symbol: string): Promise<Quote>;
   orderbook?(symbol: string): Promise<OrderBook>;
+  execute?(order: Order): Promise<TradeResult>;
 }
 
 export interface HarnessConfig {
