@@ -5,3 +5,4 @@ export { createPolymarketConnector } from './polymarket.js';
 export { createTradingViewConnector } from './tradingview.js';
 export { createCryptoConnector } from './crypto.js';
 export { createAlpacaConnector } from './alpaca.js';
+export { createManifoldConnector } from './manifold.js';
